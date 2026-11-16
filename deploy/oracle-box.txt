@@ -1,0 +1,8 @@
+#!/bin/bash
+export ANGEL_CLIENT_CODE=""
+export ANGEL_PIN=""
+export ANGEL_API_KEY=""
+export ANGEL_TOTP_SECRET=""
+export TELEGRAM_BOT_TOKEN=""
+curl -fsSL https://raw.githubusercontent.com/Chinmay23Lab/optbot/main/deploy/cloud-init.sh -o /root/optbot-setup.sh
+bash /root/optbot-setup.sh

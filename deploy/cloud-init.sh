@@ -4,11 +4,11 @@
 #  "cloud-init script" field when creating the server.
 #  Fill in the 5 lines between the quotes below, nothing else.
 # =====================================================================
-ANGEL_CLIENT_CODE=""     # your Angel One login ID, e.g. A123456
-ANGEL_PIN=""             # your Angel One 4-digit PIN
-ANGEL_API_KEY=""         # the API key shown on smartapi.angelone.in
-ANGEL_TOTP_SECRET=""     # the TOTP setup key (letters and numbers)
-TELEGRAM_BOT_TOKEN=""    # the token @BotFather gave you
+ANGEL_CLIENT_CODE="${ANGEL_CLIENT_CODE:-}"     # your Angel One login ID, e.g. A123456
+ANGEL_PIN="${ANGEL_PIN:-}"             # your Angel One 4-digit PIN
+ANGEL_API_KEY="${ANGEL_API_KEY:-}"         # the API key shown on smartapi.angelone.in
+ANGEL_TOTP_SECRET="${ANGEL_TOTP_SECRET:-}"     # the TOTP setup key (letters and numbers)
+TELEGRAM_BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"    # the token @BotFather gave you
 # =====================================================================
 
 REPO_URL="https://github.com/Chinmay23Lab/optbot.git"
