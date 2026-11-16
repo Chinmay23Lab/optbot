@@ -87,5 +87,6 @@ def load_config(path: str | Path = "config.yaml", env_path: str | Path | None = 
     if not data_dir.is_absolute():
         data_dir = (path.parent / data_dir).resolve()
     data_dir.mkdir(parents=True, exist_ok=True)
-    secrets = {k: os.environ[k] for k in SECRET_KEYS if os.environ.get(k)}
+    # Tolerate copy-paste extras: surrounding spaces or quotes.
+    secrets = {k: os.environ[k].strip().strip('"').strip("'").strip() for k in SECRET_KEYS if os.environ.get(k, "").strip()}
     return Config(raw=raw, profiles=profiles, data_dir=data_dir, secrets=secrets)

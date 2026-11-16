@@ -70,6 +70,15 @@ def discover_chat_id(token: str) -> str | None:
     except Exception as e:  # noqa: BLE001
         log.warning("telegram getUpdates failed: %s", e)
         return None
+    if not r.get("ok"):
+        log.warning("Telegram rejected the bot token (%s). Check the TELEGRAM_BOT_TOKEN value.", r.get("description"))
+        return None
+    log.warning("Telegram: %d recent message(s) to the bot", len(r.get("result", [])))
+    try:
+        me = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=20).json().get("result", {})
+        log.warning("Telegram bot is @%s", me.get("username"))
+    except Exception:  # noqa: BLE001
+        pass
     for upd in r.get("result", []):
         chat = (upd.get("message") or {}).get("chat") or {}
         if chat.get("type") == "private" and chat.get("id"):
