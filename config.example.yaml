@@ -1,0 +1,116 @@
+# optbot configuration. Copy to config.yaml on the server and adjust.
+# Secrets (API key, client code, PIN, TOTP key, Telegram token) do NOT go here:
+# they go in the .env file next to it, which only lives on your server.
+
+mode: paper            # paper is the only mode this build supports. There is no live order code.
+data_dir: ./data       # journals, state and recorded market data
+loop_seconds: 15       # how often the engine checks the market
+
+market:
+  pre_open: "08:45"    # log in, load instruments, write playbook
+  open: "09:15"
+  first_entry: "09:30" # no entries before the opening range is complete
+  last_entry: "14:00"
+  square_off: "15:10"  # all positions closed by this time
+  expiry_day_exit: "14:30"  # positions in a contract expiring today are closed by this time
+  close: "15:30"
+  # Exchange holidays (YYYY-MM-DD). Keep this updated from NSE's holiday list.
+  holidays:
+    - "2026-11-24"
+    - "2026-12-25"
+  # Days to sit out completely (RBI policy, Budget, big events).
+  no_trade_days: []
+
+# Indices the bot may trade. Lot sizes, strikes and expiries are read from Angel One's
+# instrument file every morning, so only the names and strike step live here.
+indices:
+  NIFTY:     {segment: NFO, spot_exchange: NSE, spot_names: ["Nifty 50", "NIFTY"],          strike_step: 50}
+  BANKNIFTY: {segment: NFO, spot_exchange: NSE, spot_names: ["Nifty Bank", "BANKNIFTY"],    strike_step: 100}
+  FINNIFTY:  {segment: NFO, spot_exchange: NSE, spot_names: ["Nifty Fin Service", "FINNIFTY"], strike_step: 50}
+  SENSEX:    {segment: BFO, spot_exchange: BSE, spot_names: ["SENSEX", "Sensex"],           strike_step: 100}
+  BANKEX:    {segment: BFO, spot_exchange: BSE, spot_names: ["BANKEX", "Bankex"],           strike_step: 100}
+
+vix:
+  names: ["India VIX", "INDIA VIX"]
+  max_for_entry: 25    # no new entries above this VIX
+  no_trade_above: 30   # whole day off above this
+
+strategy:
+  opening_range_minutes: 15
+  ema_fast: 9
+  ema_slow: 21
+  atr_period: 14
+  min_breakout_atr: 0.1   # breakout must clear the range by at least this many ATRs
+  max_breakout_atr: 1.5   # ...and not more (don't chase)
+  min_days_to_expiry: 1   # don't open 0-DTE trades
+  max_spread_width_steps: 6
+  min_reward_to_risk: 1.0
+  max_leg_spread_pct: 5.0 # skip options whose bid/ask gap is wider than this % of price
+
+# Each profile is a separate paper account run side by side on the same market data,
+# so the daily report compares them directly.
+profiles:
+  conservative:
+    capital: 20000
+    max_lots: 1
+    max_debit_per_lot: 3000      # max premium paid per spread lot (also its max loss)
+    max_risk_per_trade: 1000
+    stop_pct: 0.40               # stop when spread loses 40% of what was paid
+    exit_mode: target            # take profit at a target, trail after that
+    target_pct_of_max_profit: 0.60
+    trail_trigger_pct: 0.30      # once up 30% on the debit, start trailing
+    trail_giveback_pct: 0.35     # trailing stop gives back 35% of the peak gain
+    daily_profit_target: 1000    # no new entries after this
+    daily_profit_lock_pct: 0.80  # after target, keep at least 80% of it
+    daily_loss_cap: 1000
+    max_losing_trades_per_day: 1
+    weekly_loss_cap: 2000
+    account_floor: 15000
+    max_open_positions: 1
+    max_trades_per_day: 2
+
+  target_5k:
+    # Chinmay's goal: aim for ₹5k+/day, let winners run on a trailing stop, no fixed profit cap.
+    capital: 20000
+    max_lots: 10                 # lots are limited by capital and the risk cap below
+    max_debit_per_lot: 4000
+    max_risk_per_trade: 2000
+    stop_pct: 0.40
+    exit_mode: trail             # winners exit only on the trailing stop (or time)
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 0.20
+    trail_giveback_pct: 0.30
+    daily_profit_target: 5000    # after ₹5k, new entries continue only while lock is held
+    daily_profit_lock_pct: 0.80
+    continue_after_target: true
+    daily_loss_cap: 2000
+    max_losing_trades_per_day: 2
+    weekly_loss_cap: 4000
+    account_floor: 15000
+    max_open_positions: 2
+    max_trades_per_day: 4
+    max_capital_in_use_pct: 0.80
+
+# Charges applied to every simulated order (Angel One + exchange + taxes).
+# Verify against Angel One's brokerage calculator; edit if rates change.
+charges:
+  brokerage_per_order: 20.0
+  stt_sell_pct: 0.15          # % of premium on option sells (Budget 2026 rate, from 1 Apr 2026)
+  exchange_txn_pct: {NFO: 0.03503, BFO: 0.0325}
+  sebi_fee_per_crore: 10.0
+  stamp_buy_pct: 0.003
+  gst_pct: 18.0
+
+paper:
+  slippage_ticks: 1            # fill 1 tick worse than the touch price
+  max_order_rate_per_sec: 2
+
+playbook:
+  provider: rules              # rules | command
+  # With provider: command, this shell command receives market context JSON on stdin and
+  # must print a playbook JSON on stdout. Use it to plug in Vibe-Trading.
+  command: ""
+  command_timeout_sec: 180
+
+notify:
+  telegram: true               # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env
