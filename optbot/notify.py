@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 import requests
@@ -62,7 +63,38 @@ class TelegramNotifier(Notifier):
         threading.Thread(target=loop, daemon=True, name="telegram").start()
 
 
-def make_notifier(cfg, secrets: dict) -> Notifier:
-    if (cfg.get("notify") or {}).get("telegram") and secrets.get("TELEGRAM_BOT_TOKEN") and secrets.get("TELEGRAM_CHAT_ID"):
-        return TelegramNotifier(secrets["TELEGRAM_BOT_TOKEN"], secrets["TELEGRAM_CHAT_ID"])
-    return Notifier()
+def discover_chat_id(token: str) -> str | None:
+    """Find the chat of whoever pressed Start on the bot, so the user doesn't have to look up an id."""
+    try:
+        r = requests.get(f"https://api.telegram.org/bot{token}/getUpdates", timeout=20).json()
+    except Exception as e:  # noqa: BLE001
+        log.warning("telegram getUpdates failed: %s", e)
+        return None
+    for upd in r.get("result", []):
+        chat = (upd.get("message") or {}).get("chat") or {}
+        if chat.get("type") == "private" and chat.get("id"):
+            return str(chat["id"])
+    return None
+
+
+def _save_env_value(env_path: Path, key: str, value: str) -> None:
+    lines = env_path.read_text().splitlines() if env_path.exists() else []
+    lines = [l for l in lines if not l.startswith(f"{key}=")] + [f"{key}={value}"]
+    env_path.write_text("\n".join(lines) + "\n")
+    env_path.chmod(0o600)
+
+
+def make_notifier(cfg, secrets: dict, env_path: Path | None = None) -> Notifier:
+    if not (cfg.get("notify") or {}).get("telegram") or not secrets.get("TELEGRAM_BOT_TOKEN"):
+        return Notifier()
+    chat_id = secrets.get("TELEGRAM_CHAT_ID")
+    if not chat_id:
+        chat_id = discover_chat_id(secrets["TELEGRAM_BOT_TOKEN"])
+        if chat_id:
+            secrets["TELEGRAM_CHAT_ID"] = chat_id
+            if env_path:
+                _save_env_value(env_path, "TELEGRAM_CHAT_ID", chat_id)
+        else:
+            log.warning("Telegram: no chat found. Open your bot in Telegram and press Start.")
+            return Notifier()
+    return TelegramNotifier(secrets["TELEGRAM_BOT_TOKEN"], chat_id)

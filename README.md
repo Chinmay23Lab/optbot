@@ -28,7 +28,7 @@ Both start with ₹20,000 of paper money. All numbers are in `config.yaml`.
 
 ```
 pip install -r requirements.txt
-cp config.example.yaml config.yaml          # and create .env (see SETUP.md)
+# create .env with your keys (see deploy/cloud-init.sh for the names)
 python -m optbot simulate --days 5          # synthetic market, no keys needed (tests the plumbing only)
 python -m optbot check                      # SmartAPI login + live prices
 python -m optbot run                        # the real paper-trading loop

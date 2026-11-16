@@ -16,7 +16,7 @@ from optbot.risk import RiskManager
 from optbot.strategy import exit_reason, signal
 
 ROOT = Path(__file__).resolve().parents[1]
-CFG = yaml.safe_load((ROOT / "config.example.yaml").read_text())
+CFG = yaml.safe_load((ROOT / "config.yaml").read_text())
 
 
 def profile(name="conservative", **over) -> Profile:

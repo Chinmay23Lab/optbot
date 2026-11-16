@@ -33,7 +33,6 @@ python3 -m venv .venv
 .venv/bin/pip install -q --upgrade pip
 .venv/bin/pip install -q -r requirements.txt
 
-[ -f config.yaml ] || cp config.example.yaml config.yaml
 
 if [ ! -f .env ]; then
   echo

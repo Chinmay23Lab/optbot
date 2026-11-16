@@ -1,4 +1,4 @@
-# optbot configuration. Copy to config.yaml on the server and adjust.
+# optbot configuration. Kept in the repo (no secrets here) so updates reach the server automatically.
 # Secrets (API key, client code, PIN, TOTP key, Telegram token) do NOT go here:
 # they go in the .env file next to it, which only lives on your server.
 

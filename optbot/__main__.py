@@ -45,8 +45,13 @@ def cmd_check(args) -> int:
     _setup_logging(cfg.data_dir, args.verbose)
     from .marketdata import AngelData
 
-    inst = _load_instruments(cfg)
-    data = AngelData(cfg.secrets, inst, Clock())
+    n = make_notifier(cfg, cfg.secrets, Path(args.config).resolve().parent / ".env")
+    try:
+        inst = _load_instruments(cfg)
+        data = AngelData(cfg.secrets, inst, Clock())
+    except BaseException as e:  # noqa: BLE001
+        n.send(f"optbot setup check FAILED: {e}. Most likely a wrong client code, PIN, API key or TOTP key.")
+        raise
     print("Login OK.")
     print(f"VIX: {data.vix()}")
     for idx in cfg["indices"]:
@@ -55,8 +60,9 @@ def cmd_check(args) -> int:
             continue
         exps = inst.expiries(idx)
         print(f"{idx}: spot {data.index_ltp(idx)}, lot {inst.lot_size(idx)}, next expiries {[e.isoformat() for e in exps[:3]]}")
-    n = make_notifier(cfg, cfg.secrets)
-    n.send("optbot check: SmartAPI login and market data OK.")
+    n.send("optbot is set up. Angel One login and live prices work: "
+           + ", ".join(f"{i} {data.index_ltp(i)}" for i in cfg["indices"] if i in inst.spot_tokens)
+           + ". Paper trading starts at 8:45 AM on the next trading day.")
     data.logout()
     return 0
 
@@ -67,7 +73,7 @@ def cmd_run(args) -> int:
     from .engine import Engine
     from .marketdata import AngelData
 
-    notifier = make_notifier(cfg, cfg.secrets)
+    notifier = make_notifier(cfg, cfg.secrets, Path(args.config).resolve().parent / '.env')
     journal = Journal(cfg.data_dir / "journal.sqlite")
     clock = Clock()
     holder: dict = {}

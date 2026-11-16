@@ -1,83 +1,76 @@
-# Setting up optbot for ₹0 (paper trading)
+# Getting your trading bot running (free, about 30 minutes)
 
-This takes about 30–40 minutes, once. You need your Angel One login, a phone with Telegram, and a debit or credit card (Oracle uses it only to verify your identity; the Always Free server is not charged).
+You only do the parts that need *you*: your accounts and your keys. Everything else installs itself.
+Do the steps in order. If anything looks different from what's described, send a screenshot in the chat.
 
-Your keys and PIN are typed only into your own server. Never paste them into chat, including to Claude.
+**Never paste your PIN or keys into the chat.** They only go into the box in Step 4, which only you can see.
 
 ---
 
-## 1. Get your SmartAPI details ready (5 min)
+## Step 1 · GitHub (1 minute)
+This is where the bot's code lives, so your server can download it and get updates automatically.
 
-1. Go to **smartapi.angelone.in** → log in → **My Profile → My APIs**.
-2. Use your existing **Trading** API key (the one shown at the top of the page). Paper mode only reads prices, so the static IP on the ARYA app doesn't matter for now.
-3. Click **Enable TOTP** in the top menu and follow the steps. Copy the **setup key** (the text code shown beside the QR). The bot uses it to log in each morning.
-4. Have your **client code** (login ID) and **PIN** ready.
+1. Click: **https://github.com/new?name=optbot&visibility=public**
+2. Don't change anything. Click the green **Create repository** button.
+3. Reply **"done"** in the chat.
 
-## 2. Make a Telegram bot for alerts and the kill switch (3 min)
+## Step 2 · Telegram bot (3 minutes)
+This is how the bot talks to you: trade alerts, daily report, and the stop button.
 
-1. In Telegram, open **@BotFather** → send `/newbot` → pick a name. Copy the **token** it gives you.
-2. Open your new bot and press **Start** (so it can message you).
-3. Open **@userinfobot** → it replies with your **chat id** (a number). Copy it.
+1. In Telegram, search for **@BotFather** (blue tick) and open it. Tap **Start**.
+2. Send: `/newbot`
+3. It asks for a name. Send anything, e.g. `My Trading Bot`.
+4. It asks for a username. Send something ending in `bot`, e.g. `chinmay_trading_123_bot`.
+5. It replies with a long code like `7123456789:AAH...`. That is your **bot token**. Copy it somewhere safe (e.g. Notes).
+6. In the same message, tap the link to your new bot (t.me/...) and press **Start**. This lets it message you.
 
-## 3. Create the free server on Oracle Cloud (15–20 min)
+## Step 3 · Angel One TOTP key (5 minutes)
+The bot needs this to log in by itself every morning.
 
-1. Sign up at **cloud.oracle.com** → choose **home region: India West (Mumbai)**. The home region can't be changed later.
-2. After sign-up: **Menu → Compute → Instances → Create instance**.
-   - Name: `optbot`
-   - Image: **Canonical Ubuntu 24.04** (or 22.04)
-   - Shape: **Ampere A1 Flex, 1 OCPU, 6 GB** if available, otherwise **VM.Standard.E2.1.Micro**. Both are labelled "Always Free eligible".
-   - Networking: keep the defaults (a public IP is assigned).
-   - SSH keys: choose **Generate a key pair** and **download the private key** (keep it safe).
-3. Click **Create**. Wait until it shows **Running**.
-4. Connect. The easiest way is **Cloud Shell** (the `>_` icon at the top right of the Oracle console):
-   - Upload the private key (Cloud Shell menu → Upload), then run:
-     ```
-     chmod 600 ssh-key-*.key
-     ssh -i ssh-key-*.key ubuntu@<the instance's public IP>
-     ```
-   - If "Out of capacity" appears for Ampere, try again later or use the E2.1.Micro shape.
+1. Open **https://smartapi.angelone.in** and log in.
+2. Click **Enable TOTP** at the top.
+3. Enter your client code and PIN, then the OTP you receive.
+4. You'll see a QR code and, below it, a code of letters and numbers. That code is your **TOTP key**. Copy it to your Notes.
+5. Also scan the QR code with **Google Authenticator** (free app). From now on Angel One may ask for the 6-digit code from that app when you log in.
+6. Keep handy: your **client code** (login ID), your **PIN**, and your **API key** (shown on the "My APIs" page).
 
-## 4. Install the bot (5 min)
+## Step 4 · Fill in the setup box (2 minutes)
+1. Open the file **cloud-init.sh** I sent (or copy the box from the chat) into Notepad.
+2. Between the quotes on the first 5 lines, type your: client code, PIN, API key, TOTP key, Telegram bot token.
+   Example: `ANGEL_PIN="1234"`
+3. Don't change anything else. Keep Notepad open.
 
-On the server, paste:
+## Step 5 · Free Oracle server (15 minutes)
+1. Go to **https://signup.cloud.oracle.com** and sign up.
+   - **Home Region: India West (Mumbai)**. This can't be changed later.
+   - It asks for a card only to verify you're a real person. The free server is never charged.
+2. After you're in, on the home page click **Create a VM instance**.
+3. Name: `optbot`.
+4. **Image and shape** → **Edit**:
+   - **Change image** → **Ubuntu** → pick the newest version → **Select image**.
+   - **Change shape** → **Ampere** → **VM.Standard.A1.Flex** (it says "Always Free-eligible") → **Select shape**.
+     If it says "out of capacity", choose **Specialty and previous generation → VM.Standard.E2.1.Micro** instead.
+5. **Add SSH keys** → choose **No SSH keys**.
+6. Scroll down → **Show advanced options** → **Management** tab → **Paste cloud-init script**.
+   Paste the whole filled-in box from Notepad.
+7. Click **Create**.
 
-```
-curl -fsSL https://raw.githubusercontent.com/<OWNER>/<REPO>/main/deploy/install.sh -o install.sh
-bash install.sh https://github.com/<OWNER>/<REPO>.git
-```
+That's it. Within about 10 minutes your Telegram bot will message you:
+- "Server is up. Installing...", then
+- "optbot is set up. Angel One login and live prices work..."
 
-It installs everything, asks for your client code, PIN, API key, TOTP setup key and Telegram details, runs the tests, checks that it can log in and read live prices, and starts the bot as a background service. You should get a Telegram message saying the check passed.
+If you get a message saying something failed, tell me in the chat.
 
-That's it. From then on it runs by itself:
+---
 
-- **08:45 IST**: logs in, loads today's contracts, sends you the morning playbook.
-- **09:15–15:30**: paper trades both profiles (conservative and ₹5k-target) side by side.
-- **After the close**: sends the day's comparison report, logs out, sleeps until the next trading day. Weekends and the holidays in `config.yaml` are skipped.
+## After setup
 
-## Telegram commands
+Every trading day, by itself:
+- **8:45 AM**: logs in and sends you the day's plan.
+- **9:15 AM–3:30 PM**: paper-trades (no real money) two styles side by side: careful, and ₹5k-target.
+- **After 3:30 PM**: sends you the day's results, then sleeps.
 
-| Command | What it does |
-|---|---|
-| `/status` | Open positions and today's P&L per profile |
-| `/report` | Today's report now |
-| `/pause` | No new entries; open trades keep their stops |
-| `/resume` | Allow entries again (also clears a kill) |
-| `/kill` | Close everything now and block new trades until `/resume` |
+Send these to your bot any time:
+`/status` (what's open now) · `/report` (today's results) · `/pause` (stop new trades) · `/resume` · `/kill` (close everything, stop)
 
-## Useful server commands
-
-```
-journalctl -u optbot -f                 # live log
-sudo systemctl restart optbot           # restart
-nano ~/optbot/config.yaml               # change limits, then restart
-cd ~/optbot && .venv/bin/python -m optbot report   # results so far
-bash ~/optbot/deploy/install.sh         # update to the latest code
-```
-
-## Backup option: AWS free plan
-
-If Oracle won't let you sign up, AWS gives new accounts free credits for about 6 months. Create an EC2 **t4g.micro** (or t3.micro) in **Asia Pacific (Mumbai)** with Ubuntu, connect with **EC2 Instance Connect** in the browser, and run the same step 4. Set a billing alert at $1 so nothing surprises you.
-
-## What this does NOT do
-
-There is no code in this build that can place, modify or cancel a real order. A test checks that on every install. Going live would need a separate, reviewed step, a static IP registered on SmartAPI, and your explicit approval.
+The bot updates itself every morning at 7:30, so any improvements I make reach it without you doing anything.
