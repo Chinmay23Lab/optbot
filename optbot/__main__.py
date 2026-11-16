@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
 import sys
 import tempfile
@@ -22,12 +23,19 @@ from .journal import Journal
 from .notify import Notifier, make_notifier
 
 
+def _stdout_handler() -> logging.Handler:
+    h = logging.StreamHandler(sys.stdout)
+    if os.environ.get("OPTBOT_QUIET"):  # public CI logs: keep trade details out of them
+        h.setLevel(logging.WARNING)
+    return h
+
+
 def _setup_logging(data_dir: Path, verbose: bool) -> None:
     (data_dir / "logs").mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout),
+        handlers=[_stdout_handler(),
                   logging.FileHandler(data_dir / "logs" / "optbot.log")],
     )
 
@@ -95,6 +103,41 @@ def cmd_run(args) -> int:
     return 0
 
 
+def cmd_session(args) -> int:
+    """Run part of today's session and exit (for schedulers like GitHub Actions)."""
+    cfg = load_config(args.config)
+    _setup_logging(cfg.data_dir, args.verbose)
+    from .clock import parse_hhmm
+    from .engine import Engine
+    from .marketdata import AngelData
+
+    clock = Clock()
+    cal = MarketCalendar(cfg["market"])
+    now = clock.now()
+    if not cal.is_trading_day(now.date()):
+        print(f"{now.date()} is not a trading day.")
+        return 0
+    pre = cal.at(now.date(), "pre_open")
+    if now < pre:
+        clock.sleep((pre - now).total_seconds())
+    notifier = make_notifier(cfg, cfg.secrets, None)
+    journal = Journal(cfg.data_dir / "journal.sqlite")
+    inst = _load_instruments(cfg)
+    try:
+        data = AngelData(cfg.secrets, inst, clock,
+                         record_dir=None if os.environ.get("OPTBOT_NO_RECORD") else cfg.data_dir / "market")
+    except BaseException as e:  # noqa: BLE001
+        notifier.send(f"Could not log in to Angel One today: {e}")
+        raise
+    engine = Engine(cfg, data, inst, clock, notifier, journal)
+    notifier.start_commands(engine.command_handlers())
+    try:
+        engine.run_window(clock.now().date(), parse_hhmm(args.until))
+    finally:
+        data.logout()
+    return 0
+
+
 def cmd_report(args) -> int:
     cfg = load_config(args.config)
     journal = Journal(cfg.data_dir / "journal.sqlite")
@@ -145,6 +188,8 @@ def main(argv=None) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check")
     sub.add_parser("run")
+    se = sub.add_parser("session")
+    se.add_argument("--until", default="15:40")
     r = sub.add_parser("report")
     r.add_argument("--day")
     s = sub.add_parser("simulate")
@@ -153,7 +198,7 @@ def main(argv=None) -> int:
     s.add_argument("--start")
     s.add_argument("--keep", action="store_true")
     args = ap.parse_args(argv)
-    return {"check": cmd_check, "run": cmd_run, "report": cmd_report, "simulate": cmd_simulate}[args.cmd](args)
+    return {"check": cmd_check, "run": cmd_run, "session": cmd_session, "report": cmd_report, "simulate": cmd_simulate}[args.cmd](args)
 
 
 if __name__ == "__main__":

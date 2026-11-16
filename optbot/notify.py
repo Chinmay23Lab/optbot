@@ -88,11 +88,15 @@ def make_notifier(cfg, secrets: dict, env_path: Path | None = None) -> Notifier:
     if not (cfg.get("notify") or {}).get("telegram") or not secrets.get("TELEGRAM_BOT_TOKEN"):
         return Notifier()
     chat_id = secrets.get("TELEGRAM_CHAT_ID")
+    saved = Path(cfg.data_dir) / "telegram_chat_id"
+    if not chat_id and saved.exists():
+        chat_id = saved.read_text().strip()
     if not chat_id:
         chat_id = discover_chat_id(secrets["TELEGRAM_BOT_TOKEN"])
         if chat_id:
             secrets["TELEGRAM_CHAT_ID"] = chat_id
-            if env_path:
+            saved.write_text(chat_id)
+            if env_path and env_path.exists():
                 _save_env_value(env_path, "TELEGRAM_CHAT_ID", chat_id)
         else:
             log.warning("Telegram: no chat found. Open your bot in Telegram and press Start.")

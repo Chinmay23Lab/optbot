@@ -293,6 +293,74 @@ class Engine:
                             f"buy {c.buy.symbol} / sell {c.sell.symbol}, paid {pos.entry_debit:.1f} "
                             f"(₹{pos.cost:,.0f}, max loss at stop ≈ ₹{pos.cost * b.profile.stop_pct:,.0f}). {sig.reason}")
 
+    # ------------------------------------------------------------------ split sessions (GitHub Actions)
+    def _day_state_path(self):
+        return self.cfg.data_dir / "state" / "day.json"
+
+    def save_day_state(self, ended: bool = False) -> None:
+        import json
+        from dataclasses import asdict
+        st = {"day": self.day.isoformat(), "ended": ended,
+              "books": {b.profile.name: {"risk": asdict(b.risk.state), "traded": sorted(b.traded_indices)}
+                        for b in self.books}}
+        self._day_state_path().write_text(json.dumps(st, default=str, indent=1))
+
+    def resume_or_start_day(self, day: date) -> bool:
+        """Continue today's session from saved state if it exists. Returns False if today already ended."""
+        import json
+        from .risk import DayState
+        p = self._day_state_path()
+        pb = self.cfg.data_dir / "playbooks" / f"{day.isoformat()}.json"
+        if p.exists() and pb.exists():
+            st = json.loads(p.read_text())
+            if st.get("day") == day.isoformat():
+                if st.get("ended"):
+                    return False
+                self.day = day
+                self.playbook = json.loads(pb.read_text())
+                self.vix = self.playbook.get("vix")
+                for b in self.books:
+                    bs = st["books"].get(b.profile.name)
+                    b.risk.new_day(day)
+                    if bs:
+                        r = bs["risk"]
+                        b.risk.state = DayState(day, float(r["peak_pnl"]), bool(r["locked"]), bool(r["stopped"]),
+                                                r.get("stop_reason", ""))
+                        b.traded_indices = set(bs.get("traded", []))
+                log.info("resumed session for %s", day)
+                return True
+        self.start_day(day)
+        self.save_day_state()
+        return True
+
+    def run_window(self, day: date, until) -> str | None:
+        """Trade from now until `until` (a time) or the close. Returns the report if the day ended."""
+        if not self.resume_or_start_day(day):
+            log.info("session for %s already ended", day)
+            return None
+        loop = float(self.cfg.get("loop_seconds", 15))
+        open_t = self.market.at(day, "open")
+        close_t = self.market.at(day, "close")
+        sq = self.market.at(day, "square_off")
+        stop_at = min(close_t, datetime.combine(day, until, tzinfo=close_t.tzinfo))
+        if self.clock.now() < open_t:
+            self.clock.sleep((open_t - self.clock.now()).total_seconds())
+        while self.clock.now() < stop_at:
+            try:
+                self.tick()
+            except Exception as e:  # noqa: BLE001
+                log.exception("tick failed")
+                self.notify.send(f"Error in tick: {e}. Continuing; positions keep their stops.")
+            if self.clock.now() > sq and not self._all_open():
+                break
+            self.clock.sleep(loop)
+        if self.clock.now() >= sq:
+            report = self.end_day()
+            self.save_day_state(ended=True)
+            return report
+        self.save_day_state()
+        return None
+
     # ------------------------------------------------------------------ main loop
     def run_session(self, day: date) -> str:
         """Run one full trading day from pre-open to close. Returns the day's report."""

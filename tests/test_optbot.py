@@ -152,3 +152,36 @@ def test_simulation_runs_end_to_end(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(cfg))
     assert main(["--config", str(p), "simulate", "--days", "2", "--start", "2026-11-17"]) == 0
+
+
+def test_split_session_resumes_and_reports_once(tmp_path):
+    """Morning and afternoon runs (as on GitHub Actions) continue the same day and report once."""
+    from datetime import time as dtime
+    from optbot.config import load_config
+    from optbot.engine import Engine
+    from optbot.instruments import Instruments
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    from optbot.sim import SimMarket, synthetic_rows
+
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    d = date(2026, 11, 17)
+    clock = SimClock(datetime(2026, 11, 17, 8, 45, tzinfo=IST))
+    inst = Instruments(synthetic_rows(cfg["indices"], d), cfg["indices"], cfg["vix"]["names"])
+    sent = []
+
+    class Rec(Notifier):
+        def send(self, text):
+            sent.append(text)
+
+    def engine():
+        return Engine(cfg, SimMarket(clock, inst, seed=3), inst, clock, Rec(), Journal(cfg.data_dir / "journal.sqlite"))
+
+    assert engine().run_window(d, dtime(12, 0)) is None
+    assert clock.now().time() >= dtime(12, 0)
+    report = engine().run_window(d, dtime(15, 40))
+    assert report and "Paper report" in report
+    assert engine().run_window(d, dtime(15, 40)) is None  # already ended
+    assert sum("Good morning" in s for s in sent) == 1
