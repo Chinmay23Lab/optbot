@@ -15,7 +15,7 @@ from .paper import PaperAccount, PaperBroker, liquidation_value
 from .playbook import make_playbook
 from .risk import RiskManager
 from .strategy import (build_candidates, candidate_contracts, choose_for_profile, exit_reason, pick_expiry,
-                       signal)
+                       signal, trend_agrees, worst_loss_fraction)
 
 log = logging.getLogger(__name__)
 
@@ -63,8 +63,21 @@ class Engine:
         for p in book.account.open:
             v = liquidation_value(p, quotes)
             if v is not None:
-                total += (v - p.entry_debit) * p.qty - p.entry_charges
+                if "carry_mark" in p.meta:   # held from an earlier day: today's P&L counts from last close
+                    total += (v - p.meta["carry_mark"]) * p.qty
+                else:
+                    total += (v - p.entry_debit) * p.qty - p.entry_charges
         return total
+
+    def _carrying(self) -> bool:
+        """True when every open position has been cleared to stay open overnight."""
+        return all(p.meta.get("carry") for p in self._all_open())
+
+    def _refresh_trend(self) -> None:
+        for b in self.books:
+            for p in b.account.open:
+                p.meta["trend_ok"] = trend_agrees(self.playbook.get("indices", {}).get(p.index), p.direction,
+                                                  b.profile.min_trend_confidence)
 
     def _note(self, profile: str, idx: str, action: str, detail) -> None:
         key = (profile, idx)
@@ -89,19 +102,31 @@ class Engine:
         for b in self.books:
             b.risk.new_day(day)
             b.traded_indices = set()
+            for p in b.account.open:   # positions carried from an earlier day
+                p.meta["carry"] = False
+                b.traded_indices.add(p.index)
+        self._refresh_trend()
+        for b in self.books:
+            b.account.save()
             self.journal.start_day(day, b.profile.name, b.account.cash + sum(p.cost for p in b.account.open), self.playbook)
         (self.cfg.data_dir / "playbooks").mkdir(exist_ok=True)
         import json
         (self.cfg.data_dir / "playbooks" / f"{day.isoformat()}.json").write_text(json.dumps(self.playbook, indent=1, default=str))
         self.notify.send(f"Good morning. Playbook {day:%d %b}: {self.playbook.get('summary')}")
+        held = [f"[{b.profile.name}] {p.index} {p.direction} x{p.lots}" for b in self.books for p in b.account.open]
+        if held:
+            self.notify.send("Still holding from yesterday: " + "; ".join(held))
 
     def end_day(self) -> str:
         with self.lock:
             quotes = self._quotes_for(self._all_open())
             for b in self.books:
                 for p in list(b.account.open):
+                    if p.meta.get("carry"):
+                        continue
                     self._close(b, p, quotes, "end of day")
-                self.journal.end_day(self.day, b.profile.name, b.account.cash)
+                b.account.save()
+                self.journal.end_day(self.day, b.profile.name, b.account.cash + b.account.capital_in_use())
             report = self.report()
         self.notify.send(report)
         return report
@@ -118,6 +143,10 @@ class Engine:
                 pnl = t["pnl"]
                 lines.append(f"  {t['idx']} {t['direction']} x{t['lots']}: "
                              + (f"₹{pnl:+,.0f} ({t['exit_reason']})" if pnl is not None else "open"))
+            for p in b.account.open:
+                if p.meta.get("carry"):
+                    lines.append(f"  holding overnight: {p.index} {p.direction} x{p.lots} (paid {p.entry_debit:.1f}, "
+                                 f"last {p.meta.get('carry_mark')})")
             lines.append(f"  to date: {s['trades']} trades, net ₹{s['net_pnl']:+,.0f}, win rate {s['win_rate']}%, "
                          f"charges ₹{s['charges']:,.0f}, max drawdown ₹{s['max_drawdown']:,.0f}")
         return "\n".join(lines)
@@ -199,10 +228,15 @@ class Engine:
                     if v is None:
                         self._note(b.profile.name, p.index, "no-quote", "missing quote for open position")
                         continue
+                    was_carry = p.meta.get("carry")
                     reason = forced or exit_reason(p, v, now, b.profile, self.market, get_candles(p.index), scfg)
                     if reason:
                         self._close(b, p, quotes, reason)
                     else:
+                        if p.meta.get("carry") and not was_carry:
+                            up = (v - p.entry_debit) * p.qty
+                            self.notify.send(f"[{b.profile.name}] HOLDING {p.index} {p.direction} x{p.lots} overnight: "
+                                             f"up ₹{up:,.0f} so far, daily trend agrees. Max loss stays capped by the spread.")
                         b.account.save()
                 if forced:
                     self._note(b.profile.name, "*", "stop-day", forced)
@@ -253,45 +287,64 @@ class Engine:
                          and len(b.account.open) < b.profile.max_open_positions]
                 if not books:
                     continue
-                expiry = pick_expiry(self.inst, sig.index, d, scfg["min_days_to_expiry"])
-                spot = self.data.index_ltp(sig.index)
-                if not expiry or not spot:
-                    self._note("*", sig.index, "skip", "no expiry or spot price")
-                    continue
-                step = self.cfg["indices"][sig.index]["strike_step"]
-                buy, sells = candidate_contracts(self.inst, sig.index, sig.direction, spot, expiry, step,
-                                                 scfg["max_spread_width_steps"])
-                if not buy or not sells:
-                    self._note("*", sig.index, "skip", "strikes not found in instrument list")
-                    continue
-                q = self.data.quotes([buy, *sells])
-                cands = build_candidates(buy, sells, q, scfg, int(self.cfg.get("paper", {}).get("slippage_ticks", 1)))
-                if not cands:
-                    self._note("*", sig.index, "skip", "no liquid spread with enough reward")
-                    continue
+                pb_idx = self.playbook.get("indices", {}).get(sig.index)
+                eligible = []
                 for b in books:
+                    if b.profile.hold_overnight and not trend_agrees(pb_idx, sig.direction, b.profile.min_trend_confidence):
+                        self._note(b.profile.name, sig.index, "skip", "daily trend not strong in this direction")
+                    elif sig.strength < b.profile.min_signal_strength:
+                        self._note(b.profile.name, sig.index, "skip", f"breakout {sig.strength:.2f} ATR too weak")
+                    else:
+                        eligible.append(b)
+                spot = self.data.index_ltp(sig.index) if eligible else None
+                step = self.cfg["indices"][sig.index]["strike_step"]
+                cache: dict = {}
+                for b in eligible:
+                    min_dte = b.profile.min_days_to_expiry or scfg["min_days_to_expiry"]
+                    if min_dte not in cache:
+                        expiry = pick_expiry(self.inst, sig.index, d, min_dte)
+                        if not expiry or not spot:
+                            self._note("*", sig.index, "skip", "no expiry or spot price")
+                            cache[min_dte] = ([], {})
+                        else:
+                            buy, sells = candidate_contracts(self.inst, sig.index, sig.direction, spot, expiry, step,
+                                                             scfg["max_spread_width_steps"])
+                            if not buy or not sells:
+                                self._note("*", sig.index, "skip", "strikes not found in instrument list")
+                                cache[min_dte] = ([], {})
+                            else:
+                                q = self.data.quotes([buy, *sells])
+                                cache[min_dte] = (build_candidates(buy, sells, q, scfg,
+                                                                   int(self.cfg.get("paper", {}).get("slippage_ticks", 1))), q)
+                                if not cache[min_dte][0]:
+                                    self._note("*", sig.index, "skip", "no liquid spread with enough reward")
+                    cands, q = cache[min_dte]
+                    if not cands:
+                        continue
                     c = choose_for_profile(cands, b.profile)
                     if not c:
                         self._note(b.profile.name, sig.index, "skip", "every spread costs more than the per-lot cap")
                         continue
-                    lots = b.risk.size(c.cost_per_lot, c.cost_per_lot * b.profile.stop_pct, b.account.cash,
+                    lots = b.risk.size(c.cost_per_lot, c.cost_per_lot * worst_loss_fraction(b.profile), b.account.cash,
                                        b.account.capital_in_use())
                     if lots < 1:
                         self._note(b.profile.name, sig.index, "skip", f"size 0 (1 lot costs ₹{c.cost_per_lot:.0f})")
                         continue
                     meta = {"signal": sig.reason, "strength": round(sig.strength, 2), "or_high": sig.or_high,
                             "or_low": sig.or_low, "spot": spot, "vix": self.vix,
-                            "playbook_bias": self.playbook.get("indices", {}).get(sig.index, {}).get("bias")}
+                            "playbook_bias": (pb_idx or {}).get("bias"), "trend_ok": True}
                     pos = self.broker.open_spread(b.account, sig.index, sig.direction, c.buy, c.sell, lots, q, meta)
                     if pos:
                         b.traded_indices.add(sig.index)
                         self.journal.trade(pos)
                         self.journal.decision(now, b.profile.name, sig.index, "enter", meta)
                         kind = "bull call" if sig.direction == "long" else "bear put"
+                        if b.profile.hold_overnight:
+                            kind += f" (may hold up to {b.profile.max_hold_days} days)"
                         self.notify.send(
                             f"[{b.profile.name}] ENTER {sig.index} {kind} spread x{lots} lot: "
                             f"buy {c.buy.symbol} / sell {c.sell.symbol}, paid {pos.entry_debit:.1f} "
-                            f"(₹{pos.cost:,.0f}, max loss at stop ≈ ₹{pos.cost * b.profile.stop_pct:,.0f}). {sig.reason}")
+                            f"(₹{pos.cost:,.0f}, max loss ≈ ₹{pos.cost * worst_loss_fraction(b.profile):,.0f}). {sig.reason}")
 
     # ------------------------------------------------------------------ split sessions (GitHub Actions)
     def _day_state_path(self):
@@ -351,7 +404,7 @@ class Engine:
             except Exception as e:  # noqa: BLE001
                 log.exception("tick failed")
                 self.notify.send(f"Error in tick: {e}. Continuing; positions keep their stops.")
-            if self.clock.now() > sq and not self._all_open():
+            if self.clock.now() > sq and self._carrying():
                 break
             self.clock.sleep(loop)
         if self.clock.now() >= sq:
@@ -377,7 +430,7 @@ class Engine:
             except Exception as e:  # noqa: BLE001
                 log.exception("tick failed")
                 self.notify.send(f"Error in tick: {e}. Continuing; positions keep their stops.")
-            if self.clock.now() > sq and not self._all_open():
+            if self.clock.now() > sq and self._carrying():
                 break
             self.clock.sleep(loop)
         return self.end_day()

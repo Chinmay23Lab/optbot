@@ -123,11 +123,41 @@ def build_candidates(buy: Contract, sells: list[Contract], quotes: dict[str, Quo
     return out
 
 
+def worst_loss_fraction(profile: Profile) -> float:
+    """Share of the debit that can be lost. Overnight holds can gap past the stop, so assume all of it."""
+    return 1.0 if profile.hold_overnight else profile.stop_pct
+
+
 def choose_for_profile(cands: list[SpreadCandidate], profile: Profile) -> SpreadCandidate | None:
     """Widest spread whose 1-lot cost fits the profile (more room to run), else None."""
-    cap = min(profile.max_debit_per_lot, profile.max_risk_per_trade / profile.stop_pct)
+    cap = min(profile.max_debit_per_lot, profile.max_risk_per_trade / worst_loss_fraction(profile))
     fit = [c for c in cands if c.cost_per_lot <= cap]
     return max(fit, key=lambda c: c.width) if fit else None
+
+
+def trading_days_held(pos: Position, today: date, market) -> int:
+    """0 on the entry day, 1 on the next trading day, and so on."""
+    d, n = pos.entry_time.date(), 0
+    while d < today:
+        d = market.next_trading_day(d)
+        n += 1
+    return n
+
+
+def can_carry(pos: Position, value: float, today: date, profile: Profile, market) -> tuple[bool, str]:
+    """Swing positions stay open overnight only while they are working and the daily trend still agrees."""
+    if not profile.hold_overnight:
+        return False, "intraday profile"
+    if trading_days_held(pos, today, market) >= profile.max_hold_days:
+        return False, f"held {profile.max_hold_days} day(s), the maximum"
+    if value < pos.entry_debit:
+        return False, "not in profit"
+    if not pos.meta.get("trend_ok", True):
+        return False, "daily trend no longer agrees"
+    nxt = market.next_trading_day(today)
+    if any(l.contract.expiry <= nxt for l in pos.legs):
+        return False, "contract expires next session"
+    return True, "ok"
 
 
 def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, market, candles: list[Candle],
@@ -136,9 +166,18 @@ def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, ma
     debit = pos.entry_debit
     pos.peak_value = max(pos.peak_value, value)
     gain = (pos.peak_value - debit) / debit if debit else 0.0
+    held = trading_days_held(pos, now.date(), market)
 
     if now.time() >= market.t("square_off"):
-        return "time exit (square-off)"
+        ok, why = can_carry(pos, value, now.date(), profile, market)
+        if ok:
+            if not pos.meta.get("carry"):
+                pos.meta["carry"] = True
+                pos.meta["carry_mark"] = round(value, 2)
+            return None
+        return "time exit (square-off)" + ("" if not profile.hold_overnight else f": {why}")
+    if held > 0 and not pos.meta.get("trend_ok", True):
+        return "daily trend turned against the trade"
     expiries = {l.contract.expiry for l in pos.legs}
     if now.date() in expiries and now.time() >= market.t("expiry_day_exit"):
         return "expiry-day exit"
@@ -156,7 +195,7 @@ def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, ma
         pos.meta["trail_stop"] = round(trail_stop, 2)
         if value <= trail_stop:
             return f"trailing stop (peak {pos.peak_value:.1f}, stop {trail_stop:.1f})"
-    elif candles:
+    elif candles and held == 0 and not profile.hold_overnight:  # swing trades get room; the stop protects them
         closes = [c.close for c in candles]
         es = ema(closes, scfg["ema_slow"])[-1]
         last = closes[-1]
@@ -166,3 +205,11 @@ def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, ma
         if pos.direction == "short" and orl and last > orl and last > es:
             return "setup failed (back inside range, above EMA)"
     return None
+
+
+def trend_agrees(pb_index: dict | None, direction: str, min_conf: float) -> bool:
+    """Does the daily trend from the morning playbook point the same way, with enough confidence?"""
+    if not pb_index:
+        return False
+    want = "bullish" if direction == "long" else "bearish"
+    return pb_index.get("bias") == want and float(pb_index.get("confidence") or 0) >= min_conf

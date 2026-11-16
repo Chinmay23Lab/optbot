@@ -185,3 +185,54 @@ def test_split_session_resumes_and_reports_once(tmp_path):
     assert report and "Paper report" in report
     assert engine().run_window(d, dtime(15, 40)) is None  # already ended
     assert sum("Good morning" in s for s in sent) == 1
+
+
+def test_swing_holds_overnight_only_when_working():
+    from datetime import timedelta
+    mkt = MarketCalendar(CFG["market"])
+    sw = profile("swing")
+    sq = datetime(2026, 11, 17, 15, 11, tzinfo=IST)
+    # in profit, trend agrees -> carried, not closed
+    p = _pos()
+    pass
+    p.meta["trend_ok"] = True
+    assert exit_reason(p, 50.0, sq, sw, mkt, [], CFG["strategy"]) is None and p.meta["carry"]
+    # losing at square-off -> closed
+    p2 = _pos()
+    assert "not in profit" in exit_reason(p2, 35.0, sq, sw, mkt, [], CFG["strategy"])
+    # next day: trend turned -> exit
+    p.meta["trend_ok"] = False
+    assert "trend turned" in exit_reason(p, 50.0, datetime(2026, 11, 18, 10, 0, tzinfo=IST), sw, mkt, [], CFG["strategy"])
+    # held max days -> closed at square-off on day 2
+    p3 = _pos()
+    p3.meta["trend_ok"] = True
+    assert "maximum" in exit_reason(p3, 60.0, datetime(2026, 11, 19, 15, 11, tzinfo=IST), sw, mkt, [], CFG["strategy"])
+    # intraday profiles never carry
+    assert "time exit" in exit_reason(_pos(), 60.0, sq, profile("target_5k"), mkt, [], CFG["strategy"])
+
+
+def test_swing_entry_needs_daily_trend():
+    from optbot.strategy import trend_agrees
+    assert trend_agrees({"bias": "bullish", "confidence": 0.5}, "long", 0.3)
+    assert not trend_agrees({"bias": "bullish", "confidence": 0.1}, "long", 0.3)
+    assert not trend_agrees({"bias": "neutral", "confidence": 0.9}, "long", 0.3)
+    assert not trend_agrees({"bias": "bullish", "confidence": 0.9}, "short", 0.3)
+
+
+def test_carried_position_survives_end_of_day(tmp_path):
+    from optbot.engine import Engine
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    clock = SimClock(datetime(2026, 11, 17, 15, 20, tzinfo=IST))
+    eng = Engine(cfg, None, None, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.day = date(2026, 11, 17)
+    eng.data = type("D", (), {"quotes": lambda self, cs: {}})()
+    book = next(b for b in eng.books if b.profile.name == "swing")
+    pos = _pos(); pos.profile = "swing"; pos.meta.update(carry=True, carry_mark=50.0)
+    book.account.open.append(pos); book.account.save()
+    eng.end_day()
+    again = Engine(cfg, None, None, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    assert len(next(b for b in again.books if b.profile.name == "swing").account.open) == 1

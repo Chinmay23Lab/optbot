@@ -31,6 +31,12 @@ class Profile:
     max_trades_per_day: int
     continue_after_target: bool = False
     max_capital_in_use_pct: float = 1.0
+    # Swing (1-2 day) holding. Off for intraday profiles.
+    hold_overnight: bool = False
+    max_hold_days: int = 2           # trading days after entry; closed at square-off on the last one
+    min_days_to_expiry: int | None = None  # overrides strategy.min_days_to_expiry for this profile
+    min_trend_confidence: float = 0.0      # daily trend confidence (0-1) needed to enter
+    min_signal_strength: float = 0.0       # intraday breakout strength (ATRs) needed to enter
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> "Profile":

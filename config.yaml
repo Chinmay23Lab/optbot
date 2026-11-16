@@ -91,6 +91,35 @@ profiles:
     max_trades_per_day: 4
     max_capital_in_use_pct: 0.80
 
+  swing:
+    # Holds 1-2 days when the daily trend and the day's breakout strongly agree. Overnight only while
+    # the trade is in profit and the trend still agrees; closed at the latest on the 2nd day after entry.
+    # Gap risk: the market can open sharply against an overnight hold. The spread caps the worst case.
+    capital: 20000
+    max_lots: 2
+    max_debit_per_lot: 2000
+    max_risk_per_trade: 2000     # sized so that even losing the whole spread overnight costs at most this
+    stop_pct: 0.40
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 0.30
+    trail_giveback_pct: 0.35
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.80
+    continue_after_target: true
+    daily_loss_cap: 2000
+    max_losing_trades_per_day: 1
+    weekly_loss_cap: 3000
+    account_floor: 15000
+    max_open_positions: 1
+    max_trades_per_day: 1
+    max_capital_in_use_pct: 0.80
+    hold_overnight: true
+    max_hold_days: 2
+    min_days_to_expiry: 4        # use an expiry far enough out that the hold never runs into it
+    min_trend_confidence: 0.30   # daily trend must be clearly up (for calls) or down (for puts)
+    min_signal_strength: 0.30    # and the day's breakout must be decent, not marginal
+
 # Charges applied to every simulated order (Angel One + exchange + taxes).
 # Verify against Angel One's brokerage calculator; edit if rates change.
 charges:
