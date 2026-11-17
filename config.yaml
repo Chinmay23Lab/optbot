@@ -45,7 +45,13 @@ strategy:
   min_days_to_expiry: 1   # don't open 0-DTE trades
   max_spread_width_steps: 6
   min_reward_to_risk: 1.0
-  max_leg_spread_pct: 5.0 # skip options whose bid/ask gap is wider than this % of price
+  max_leg_spread_pct: 5.0
+  # Tighter trailing once a trade is well up: [gain on the amount paid, max share of the gain to give back].
+  # E.g. once the spread is worth double what was paid (+100%), give back at most 15% of the gain.
+  trail_tighten:
+    - [0.60, 0.22]
+    - [1.00, 0.15]
+    - [1.50, 0.10] # skip options whose bid/ask gap is wider than this % of price
 
 # Each profile is a separate paper account run side by side on the same market data,
 # so the daily report compares them directly.

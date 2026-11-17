@@ -191,7 +191,12 @@ def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, ma
     if gain >= profile.trail_trigger_pct:
         pos.trail_active = True
     if pos.trail_active:
-        trail_stop = max(debit * 1.02, pos.peak_value - profile.trail_giveback_pct * (pos.peak_value - debit))
+        # The bigger the gain, the less of it the trade may give back (locks big moves sooner).
+        giveback = profile.trail_giveback_pct
+        for at_gain, gb in scfg.get("trail_tighten", []):
+            if gain >= at_gain:
+                giveback = min(giveback, gb)
+        trail_stop = max(debit * 1.02, pos.peak_value - giveback * (pos.peak_value - debit))
         pos.meta["trail_stop"] = round(trail_stop, 2)
         if value <= trail_stop:
             return f"trailing stop (peak {pos.peak_value:.1f}, stop {trail_stop:.1f})"

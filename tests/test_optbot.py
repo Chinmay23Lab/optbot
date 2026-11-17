@@ -236,3 +236,13 @@ def test_carried_position_survives_end_of_day(tmp_path):
     eng.end_day()
     again = Engine(cfg, None, None, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
     assert len(next(b for b in again.books if b.profile.name == "swing").account.open) == 1
+
+
+def test_trail_tightens_on_big_gains():
+    mkt = MarketCalendar(CFG["market"])
+    t = datetime(2026, 11, 17, 11, 0, tzinfo=IST)
+    p = _pos(debit=40.0, width=300.0)
+    assert exit_reason(p, 119.0, t, profile("target_5k"), mkt, [], CFG["strategy"]) is None
+    # +198% gain: may give back only 10% of the 79-point gain -> stop at about 111
+    assert p.meta["trail_stop"] >= 110
+    assert "trailing stop" in exit_reason(p, 110.0, t, profile("target_5k"), mkt, [], CFG["strategy"])
