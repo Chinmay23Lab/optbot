@@ -147,5 +147,12 @@ playbook:
   command: ""
   command_timeout_sec: 180
 
+# Save the option chain (prices and open interest, nearest expiry) every few minutes, to build our own
+# history for testing option-chain signals later. Does not affect trading.
+record_option_chain:
+  enabled: true
+  every_minutes: 5
+  strikes_each_side: 10
+
 notify:
   telegram: true               # needs TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in .env

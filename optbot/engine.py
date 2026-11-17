@@ -50,6 +50,7 @@ class Engine:
         self.vix: float | None = None
         self.lock = threading.RLock()
         self._last_reason: dict[tuple, str] = {}
+        self._last_chain_snap = None
 
     # ------------------------------------------------------------------ helpers
     def _quotes_for(self, positions: list[Position]) -> dict[str, Quote]:
@@ -201,8 +202,59 @@ class Engine:
         return {"/status": self.cmd_status, "/pause": self.cmd_pause, "/resume": self.cmd_resume,
                 "/kill": self.cmd_kill, "/report": self.cmd_report}
 
+    # ------------------------------------------------------------------ option-chain history
+    def snapshot_chains(self) -> None:
+        """Save prices and open interest around the money for each index (builds our own history for research)."""
+        rc = self.cfg.get("record_option_chain") or {}
+        if not rc.get("enabled") or self.data is None or self.inst is None:
+            return
+        now = self.clock.now()
+        if not (self.market.t("open") <= now.time() <= self.market.t("close")):
+            return
+        every = float(rc.get("every_minutes", 5)) * 60
+        if self._last_chain_snap and (now - self._last_chain_snap).total_seconds() < every:
+            return
+        self._last_chain_snap = now
+        import csv
+        k = int(rc.get("strikes_each_side", 10))
+        rows, contracts = [], []
+        for idx in self.indices:
+            try:
+                spot = self.data.index_ltp(idx)
+                exps = [e for e in self.inst.expiries(idx) if e >= now.date()][:1]
+                if not spot or not exps:
+                    continue
+                step = self.cfg["indices"][idx]["strike_step"]
+                atm = round(spot / step) * step
+                wanted = {atm + i * step for i in range(-k, k + 1)}
+                cs = [c for c in self.inst.chain(idx, exps[0]) if c.strike in wanted]
+                contracts += cs
+                rows += [(idx, spot, c) for c in cs]
+            except Exception as e:  # noqa: BLE001
+                log.warning("chain snapshot %s: %s", idx, e)
+        if not contracts:
+            return
+        q = self.data.quotes(contracts)
+        d = self.cfg.data_dir / "chain"
+        d.mkdir(exist_ok=True)
+        path = d / f"{now.date().isoformat()}.csv"
+        new = not path.exists()
+        with path.open("a", newline="") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["ts", "index", "spot", "expiry", "strike", "right", "ltp", "bid", "ask", "oi"])
+            for idx, spot, c in rows:
+                x = q.get(c.token)
+                if x:
+                    w.writerow([now.isoformat(timespec="seconds"), idx, spot, c.expiry.isoformat(), c.strike, c.right,
+                                x.ltp, x.bid, x.ask, x.oi])
+
     # ------------------------------------------------------------------ the tick
     def tick(self) -> None:
+        try:
+            self.snapshot_chains()
+        except Exception as e:  # noqa: BLE001
+            log.warning("chain snapshot failed: %s", e)
         with self.lock:
             now = self.clock.now()
             d = now.date()
