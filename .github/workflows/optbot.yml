@@ -4,9 +4,17 @@ name: optbot paper trading
 # can run for at most 6 hours. State (paper accounts, journal) is carried between runs in
 # the Actions cache, not committed to this public repo.
 on:
+  # GitHub sometimes starts scheduled runs late or skips them, so each part has backup start times.
+  # Extra starts are harmless: runs queue one at a time, and a part that already ran just exits.
   schedule:
-    - cron: "15 2 * * 1-5"   # 07:45 IST: morning part, trades until 12:00
-    - cron: "45 5 * * 1-5"   # 11:15 IST: afternoon part, waits for the morning run, trades to the close
+    - cron: "7 2 * * 1-5"    # 07:37 IST  morning part (trades until 12:00)
+    - cron: "37 2 * * 1-5"   # 08:07 IST  morning backup
+    - cron: "3 3 * * 1-5"    # 08:33 IST  morning backup
+    - cron: "33 3 * * 1-5"   # 09:03 IST  morning backup
+    - cron: "47 5 * * 1-5"   # 11:17 IST  afternoon part (waits for the morning run, trades to the close)
+    - cron: "17 6 * * 1-5"   # 11:47 IST  afternoon backup
+    - cron: "52 6 * * 1-5"   # 12:22 IST  afternoon backup
+    - cron: "37 7 * * 1-5"   # 13:07 IST  afternoon backup
   workflow_dispatch:
     inputs:
       mode:
@@ -60,7 +68,8 @@ jobs:
         run: |
           MODE="$INPUT_MODE"
           if [ -z "$MODE" ]; then
-            if [ "$SCHEDULE" = "15 2 * * 1-5" ]; then MODE=morning; else MODE=afternoon; fi
+            # decide by the current time: before 11:00 IST it's the morning part
+            if [ "$(TZ=Asia/Kolkata date +%H%M)" -lt 1100 ]; then MODE=morning; else MODE=afternoon; fi
           fi
           case "$MODE" in check|morning|afternoon) ;; *) echo "bad mode"; exit 1;; esac
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
