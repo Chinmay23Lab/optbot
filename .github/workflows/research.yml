@@ -1,0 +1,46 @@
+name: indicator study
+
+# Read-only research: downloads index price history from Angel One and tests indicators.
+# Shares the "optbot" queue so it never logs in while a trading session is running.
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "years of history"
+        default: "3"
+
+concurrency:
+  group: optbot
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TZ: Asia/Kolkata
+      YEARS: ${{ github.event.inputs.years }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Download price history
+        run: python research/indicator_study.py fetch --out research_data --years "${YEARS:-3}"
+      - name: Test indicators
+        run: python research/indicator_study.py analyze --data research_data --report report.md && cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: indicator-study
+          path: |
+            report.md
+            research_data/*.csv
