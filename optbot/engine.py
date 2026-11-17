@@ -229,10 +229,16 @@ class Engine:
                         self._note(b.profile.name, p.index, "no-quote", "missing quote for open position")
                         continue
                     was_carry = p.meta.get("carry")
+                    was_trailing = p.trail_active
                     reason = forced or exit_reason(p, v, now, b.profile, self.market, get_candles(p.index), scfg)
                     if reason:
                         self._close(b, p, quotes, reason)
                     else:
+                        if p.trail_active and not was_trailing:
+                            up = (v - p.entry_debit) * p.qty
+                            self.notify.send(f"🔒 {p.index} trade is up ₹{up:,.0f}. Stop moved into profit "
+                                             f"(exits if the pair falls to ₹{p.meta.get('trail_stop')}), and it keeps "
+                                             f"rising with the price.")
                         if p.meta.get("carry") and not was_carry:
                             up = (v - p.entry_debit) * p.qty
                             self.notify.send(f"[{b.profile.name}] HOLDING {p.index} {p.direction} x{p.lots} overnight: "
