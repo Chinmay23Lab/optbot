@@ -211,6 +211,8 @@ class Engine:
         now = self.clock.now()
         if not (self.market.t("open") <= now.time() <= self.market.t("close")):
             return
+        if now.minute % 5 < 2:   # stay clear of the 5-minute candle fetches to respect API rate limits
+            return
         every = float(rc.get("every_minutes", 5)) * 60
         if self._last_chain_snap and (now - self._last_chain_snap).total_seconds() < every:
             return

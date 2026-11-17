@@ -62,7 +62,7 @@ class AngelData:
         self.inst = instruments
         self.clock = clock
         self.quote_rl = RateLimiter(1.0)
-        self.candle_rl = RateLimiter(2.0)
+        self.candle_rl = RateLimiter(1.0)
         self._candle_cache: dict[tuple, tuple[float, list[Candle]]] = {}
         self.record_dir = record_dir
         if record_dir:
@@ -95,8 +95,10 @@ class AngelData:
                     continue
                 log.warning("SmartAPI %s: %s", getattr(fn, "__name__", fn), msg)
             except Exception as e:  # noqa: BLE001
-                log.warning("SmartAPI error (%s), attempt %d", e, attempt + 1)
-                time.sleep(1 + attempt)
+                rate = "access rate" in str(e)
+                if not rate or attempt:
+                    log.warning("SmartAPI error (%s), attempt %d", e, attempt + 1)
+                time.sleep((3 + 3 * attempt) if rate else (1 + attempt))  # back off harder on rate limits
         return None
 
     # --- quotes --------------------------------------------------------------
