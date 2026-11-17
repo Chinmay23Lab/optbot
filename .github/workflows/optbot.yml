@@ -29,6 +29,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write   # lets the morning run start the afternoon run itself
 
 jobs:
   run:
@@ -96,3 +97,18 @@ jobs:
         with:
           path: data
           key: optbot-state-${{ github.run_id }}
+
+      # GitHub's timers are unreliable, so the morning run starts the afternoon run itself
+      # (unless one is already queued or running). It waits in the queue until the morning run ends.
+      - name: Hand over to the afternoon run
+        if: always() && steps.mode.outputs.mode == 'morning'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SELF: ${{ github.run_id }}
+        run: |
+          busy=$(gh api "repos/$REPO/actions/runs?status=queued" --jq "[.workflow_runs[] | select(.id != $SELF and .name == \"optbot paper trading\")] | length")
+          if [ "$busy" != "0" ]; then echo "a run is already queued"; exit 0; fi
+          gh api -X POST "repos/$REPO/actions/workflows/optbot.yml/dispatches" -f ref=main -f 'inputs[mode]=afternoon'
+          echo "afternoon run requested"
+

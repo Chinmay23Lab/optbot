@@ -1,7 +1,7 @@
 name: indicator study
 
 # Read-only research: downloads index price history from Angel One and tests indicators.
-# Shares the "optbot" queue so it never logs in while a trading session is running.
+# Start it only outside market hours, so it never logs in while a trading session is running.
 on:
   workflow_dispatch:
     inputs:
@@ -10,7 +10,7 @@ on:
         default: "3"
 
 concurrency:
-  group: optbot
+  group: optbot-research
   cancel-in-progress: false
 
 permissions:
