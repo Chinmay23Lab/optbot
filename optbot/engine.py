@@ -10,6 +10,7 @@ from .config import Config
 from .instruments import Instruments
 from .journal import Journal
 from .models import Position, Quote
+from .messages import entry_message, exit_message
 from .notify import Notifier
 from .paper import PaperAccount, PaperBroker, liquidation_value
 from .playbook import make_playbook
@@ -91,8 +92,7 @@ class Engine:
         if self.broker.close_position(book.account, pos, quotes, reason):
             self.journal.trade(pos)
             pnl = pos.realized_pnl()
-            self.notify.send(f"[{book.profile.name}] EXIT {pos.index} {pos.direction} x{pos.lots} lot: "
-                             f"₹{pnl:+,.0f} ({reason})")
+            self.notify.send(exit_message(pos, reason))
 
     # ------------------------------------------------------------------ day lifecycle
     def start_day(self, day: date) -> None:
@@ -338,13 +338,9 @@ class Engine:
                         b.traded_indices.add(sig.index)
                         self.journal.trade(pos)
                         self.journal.decision(now, b.profile.name, sig.index, "enter", meta)
-                        kind = "bull call" if sig.direction == "long" else "bear put"
-                        if b.profile.hold_overnight:
-                            kind += f" (may hold up to {b.profile.max_hold_days} days)"
-                        self.notify.send(
-                            f"[{b.profile.name}] ENTER {sig.index} {kind} spread x{lots} lot: "
-                            f"buy {c.buy.symbol} / sell {c.sell.symbol}, paid {pos.entry_debit:.1f} "
-                            f"(₹{pos.cost:,.0f}, max loss ≈ ₹{pos.cost * worst_loss_fraction(b.profile):,.0f}). {sig.reason}")
+                        self.notify.send(entry_message(
+                            pos, b.profile.stop_pct, worst_loss_fraction(b.profile),
+                            b.profile.max_hold_days if b.profile.hold_overnight else None, sig.reason))
 
     # ------------------------------------------------------------------ split sessions (GitHub Actions)
     def _day_state_path(self):
