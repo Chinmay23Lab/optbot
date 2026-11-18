@@ -43,7 +43,11 @@ jobs:
         run: python research/sniper_study.py fetch --out sniper_data --years "${YEARS:-3}"
       - name: Test the rebuilt indicator
         run: python research/sniper_study.py analyze --data sniper_data --report sniper_report.md && cat sniper_report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Test every candlestick and chart pattern
+        run: python research/pattern_study.py --data sniper_data --report pattern_report.md && cat pattern_report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: sniper-study
-          path: sniper_report.md
+          path: |
+            sniper_report.md
+            pattern_report.md

@@ -384,3 +384,24 @@ def test_loss_cap_keeps_bought_options_open_but_blocks_new_trades(tmp_path):
     eng.tick()
     assert len(tv.account.open) == 1, "bought option must keep running to its own stop"
     assert tv.risk.state.stopped and "daily loss cap" in tv.risk.state.stop_reason
+
+
+def test_patterns_use_no_future_bars():
+    import random as _r
+    from datetime import timedelta as _td
+    from optbot.patterns import candle_patterns_full, chart_patterns
+    from optbot.sniper_rules import Bar, atr
+    _r.seed(4)
+    bars, p, t = [], 100.0, datetime(2026, 1, 1, 9, 15)
+    for k in range(400):
+        o = p + _r.gauss(0, 0.3)
+        p = o + _r.gauss(0, 1)
+        bars.append(Bar(t + _td(minutes=60 * k), o, max(o, p) + abs(_r.gauss(0, .5)), min(o, p) - abs(_r.gauss(0, .5)), p))
+    full_c, full_ch = candle_patterns_full(bars), chart_patterns(bars, atr(bars))
+    for cut in (150, 260, 399):
+        part = bars[:cut + 1]
+        pc, pch = candle_patterns_full(part), chart_patterns(part, atr(part))
+        for k in pc:
+            assert pc[k][cut] == full_c[k][cut], k
+        for k in pch:
+            assert pch[k][cut] == full_ch[k][cut], k

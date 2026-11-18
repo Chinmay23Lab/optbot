@@ -149,7 +149,8 @@ def candle_patterns(bars) -> dict[str, list[int]]:
     return out
 
 
-def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15):
+def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15, extra: dict | None = None):
+    """extra: {pattern name: per-bar +1/-1/0} adds 'D + <name>' and '<name> + trend + all 5' rules."""
     c = [b.c for b in b15]
     e5, e21, e100, e200 = ema(c, 5), ema(c, 21), ema(c, 100), ema(c, 200)
     d30, d60 = htf_dir(b15, b30, h1, base), htf_dir(b15, b60, h2, base)
@@ -196,6 +197,22 @@ def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15):
             if candle(i, d, kinds) and trend(i, d) and confirms(i, d) >= need:
                 return d
         return 0
+
+    if extra is not None:
+        out = {}
+        for pname, ser in extra.items():
+            def dp(i, ser=ser):
+                d = D(i)
+                return d if d and (ser[i] == d or ser[i - 1] == d) else 0
+
+            def pe(i, ser=ser):
+                d = ser[i] if i >= 200 else 0
+                return d if d and trend(i, d) and confirms(i, d) == 5 else 0
+            out[f"D + {pname}"] = dp
+            out[f"{pname} + trend + all 5"] = pe
+        out["D cross + all 5 (current base)"] = D
+        out["G D + confirming candle (current rule)"] = lambda i: (d if (d := D(i)) and candle(i, d) else 0)
+        return out
 
     return {
         "G D + confirming candle": lambda i: (d if (d := D(i)) and candle(i, d) else 0),
