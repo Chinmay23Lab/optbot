@@ -110,7 +110,10 @@ class Trade:
 
 
 def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int = 15, tp_step: float = 2.0) -> list[Trade]:
-    """mode 'tp1': exit everything at TP1. mode 'run': at TP1 move SL to entry, then exit at TP3 or stop."""
+    """mode 'tp1': exit everything at TP1. mode 'run': at TP1 move SL to entry, then exit at TP3 or stop.
+    mode 'flip': no target; hold until the stop or an opposite signal, then exit and take the reverse trade.
+    mode 'tp1flip': like 'flip', but at TP1 the stop moves to entry (a winner can't turn into a loser)."""
+    flip = mode in ("flip", "tp1flip")
     trades, n, i = [], len(b15), 0
     busy_until = -1
     while i < n:
@@ -126,6 +129,7 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int =
         entry, risk = b.c, sl_atr * a15[i]
         stop, tp1, tp3 = entry - d * risk, entry + d * tp_step * risk, entry + d * 3 * tp_step * risk
         hit1, exit_px, days, last_day, m = False, None, 1, b.ts.date(), i + 1
+        rev = False
         while m < n:
             x = b15[m]
             if x.ts.date() != last_day:
@@ -144,8 +148,13 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int =
                 if mode == "tp1":
                     exit_px = tp1
                     break
-                stop = entry
-            if hit1 and ((x.h >= tp3) if d == 1 else (x.l <= tp3)):
+                if mode != "flip":
+                    stop = entry
+            if flip and (FIRST_ENTRY <= (x.ts + timedelta(minutes=base)).time() <= LAST_ENTRY or max_days > 1) \
+                    and sig(m) == -d:
+                exit_px, rev = x.c, True   # reversal signal: book here, the reverse trade starts on this bar
+                break
+            if not flip and hit1 and ((x.h >= tp3) if d == 1 else (x.l <= tp3)):
                 exit_px = tp3
                 break
             if max_days == 1 and (x.ts + timedelta(minutes=base)).time() >= SQUARE_OFF:
@@ -157,9 +166,14 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int =
         nights = (b15[min(m, n - 1)].ts.date() - b.ts.date()).days and \
             len({x.ts.date() for x in b15[i:min(m, n - 1) + 1]}) - 1
         trades.append(Trade(b.ts.date(), d * (exit_px - entry), hit1, nights, entry))
-        busy_until = m
-        i = m + 1
+        reversed_here = rev
+        busy_until = m - 1 if reversed_here else m
+        i = m if reversed_here else m + 1
     return trades
+
+
+EXIT_NAMES = {"tp1": "all at TP1", "run": "TP1 then run to TP3", "flip": "hold till reversal, then flip",
+              "tp1flip": "TP1 locks entry, hold till reversal, flip"}
 
 
 def rupees(t: Trade, lot: int, cost_rs: float) -> float:
@@ -193,6 +207,7 @@ def analyze(data: Path, test_days: int = 250) -> str:
         lots[k] = (int(lot), kind)
     # TP spacing seen on Chinmay's screenshots: about 1.3x the stop distance (NIFTY) and 2x (Bharti Airtel)
     variants = [(sl, mode, md, tp) for sl in (1.0, 1.5) for mode in ("tp1", "run") for md in (1, 3) for tp in (1.3, 2.0)]
+    variants += [(sl, mode, md, 2.0) for sl in (1.0, 1.5) for mode in ("flip", "tp1flip") for md in (1, 3)]
     rows, combined, combined_train = [], {}, {}
     for name, (lot, kind) in lots.items():
         p = data / f"{name}_5m.csv"
@@ -238,8 +253,15 @@ def analyze(data: Path, test_days: int = 250) -> str:
     shown = [r for r in ranked if "Random" not in r[0][0]][:30] + [r for r in ranked if "Random" in r[0][0]][:5]
     for key, n, tp1, win, mean, tot, t in shown:
         s, sl, mode, md, tp = key
-        lines.append(f"| {s} | {sl} | {tp} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
+        lines.append(f"| {s} | {sl} | {tp} | {EXIT_NAMES[mode]} | {md} | {n} | "
                      f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} | {train_summary(combined_train.get(key, []))} |")
+    lines += ["", "## Reversal flip: hold until the opposite signal, then book and reverse (best 15, all timeframes)", "",
+              "| Signal | SL (ATR) | Exit | Hold days | Trades | Win % | ₹/trade | Total ₹ | t | Older 2 years: ₹/trade (t) |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
+    for key, n, tp1, win, mean, tot, t in [r for r in ranked if r[0][2] in ("flip", "tp1flip") and "Random" not in r[0][0]][:15]:
+        s, sl, mode, md, tp = key
+        lines.append(f"| {s} | {sl} | {EXIT_NAMES[mode]} | {md} | {n} | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} | "
+                     f"{train_summary(combined_train.get(key, []))} |")
     lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
     for name in lots:
