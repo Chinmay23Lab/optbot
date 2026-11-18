@@ -210,6 +210,14 @@ def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15, extr
                 return d if d and trend(i, d) and confirms(i, d) == 5 else 0
             out[f"D + {pname}"] = dp
             out[f"{pname} + trend + all 5"] = pe
+        rb = extra.get("range breakout (20 bars)")
+        if rb is not None:
+            def brk(i, d):
+                return rb[i] == d or rb[i - 1] == d
+            out["M D + (confirming candle OR 20-bar breakout)"] = \
+                lambda i: (d if (d := D(i)) and (candle(i, d) or brk(i, d)) else 0)
+            out["N D + confirming candle AND 20-bar breakout"] = \
+                lambda i: (d if (d := D(i)) and candle(i, d) and brk(i, d) else 0)
         out["D cross + all 5 (current base)"] = D
         out["G D + confirming candle (current rule)"] = lambda i: (d if (d := D(i)) and candle(i, d) else 0)
         return out
