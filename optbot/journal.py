@@ -30,13 +30,19 @@ class Journal:
                          detail if isinstance(detail, str) else json.dumps(detail, default=str)))
         self.db.commit()
 
+    def day_decisions(self, day: date) -> list[tuple[str, str, str, str]]:
+        """(profile, idx, action, detail) for every non-entry decision of the day, oldest first."""
+        return [tuple(r) for r in self.db.execute(
+            "SELECT profile, idx, action, detail FROM decisions WHERE day=? AND action!='enter' ORDER BY ts",
+            (day.isoformat(),)).fetchall()]
+
     def trade(self, p: Position) -> None:
         buy = next(l for l in p.legs if l.side == "BUY")
-        sell = next(l for l in p.legs if l.side == "SELL")
+        sell = next((l for l in p.legs if l.side == "SELL"), None)
         self.db.execute(
             "INSERT OR REPLACE INTO trades VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (p.id, p.profile, p.entry_time.date().isoformat(), p.index, p.direction, p.lots, p.qty,
-             buy.contract.symbol, sell.contract.symbol, p.entry_time.isoformat(),
+             buy.contract.symbol, sell.contract.symbol if sell else None, p.entry_time.isoformat(),
              p.exit_time.isoformat() if p.exit_time else None, p.entry_debit, p.exit_value, p.width,
              p.entry_charges + p.exit_charges, p.realized_pnl() if p.exit_time else None, p.exit_reason,
              json.dumps(p.meta, default=str)))

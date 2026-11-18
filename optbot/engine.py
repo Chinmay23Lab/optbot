@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 from datetime import date, datetime, timedelta
 
@@ -10,12 +11,12 @@ from .config import Config
 from .instruments import Instruments
 from .journal import Journal
 from .models import Position, Quote
-from .messages import entry_message, exit_message
+from .messages import STYLE_NAMES, entry_message, exit_message
 from .notify import Notifier
 from .paper import PaperAccount, PaperBroker, liquidation_value
 from .playbook import make_playbook
 from .risk import RiskManager
-from .strategy import (build_candidates, candidate_contracts, choose_for_profile, exit_reason, pick_expiry,
+from .strategy import (build_candidates, candidate_contracts, choose_for_profile, choose_single, single_candidates, exit_reason, pick_expiry,
                        signal, trend_agrees, worst_loss_fraction)
 
 log = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ class Engine:
         state_dir.mkdir(exist_ok=True)
         self.books = [Book(p, PaperAccount(p.name, p.capital, state_dir / f"{p.name}.json")) for p in cfg.profiles]
         self.indices = list(cfg["indices"].keys())
+        self.stocks = [s.upper() for s in ((cfg.get("stocks") or {}).get("names") or [])]
         self.playbook: dict = {}
         self.day: date | None = None
         self.vix: float | None = None
@@ -150,7 +152,47 @@ class Engine:
                                  f"last {p.meta.get('carry_mark')})")
             lines.append(f"  to date: {s['trades']} trades, net ₹{s['net_pnl']:+,.0f}, win rate {s['win_rate']}%, "
                          f"charges ₹{s['charges']:,.0f}, max drawdown ₹{s['max_drawdown']:,.0f}")
+        why = self.why_summary(d)
+        if why:
+            lines.append("\nWhy it did not trade more today:")
+            lines.extend("  " + w for w in why)
         return "\n".join(lines)
+
+    def why_summary(self, d: date | None = None) -> list[str]:
+        """Plain-English reasons the bot did not trade, from today's journal."""
+        d = d or self.day or self.clock.now().date()
+        rows = self.journal.day_decisions(d)
+        if not rows:
+            return []
+        per_index: dict[str, str] = {}
+        counts: dict[str, int] = {}
+        blocked: dict[str, str] = {}
+        general: list[str] = []
+        for prof, idx, action, detail in rows:
+            if action == "no-signal" and idx != "*":
+                per_index[idx] = detail
+                key = re.sub(r"[-\d.]+ ATR", "ATR", detail)
+                counts[key] = counts.get(key, 0) + 1
+            elif action == "blocked":
+                blocked[prof] = detail
+            elif action == "skip":
+                where = idx if prof == "*" else f"{STYLE_NAMES.get(prof, prof)} on {idx}"
+                line = f"{where}: {detail}"
+                if line not in general:
+                    general.append(line)
+            elif action in ("no-trade", "stop-day"):
+                line = f"{STYLE_NAMES.get(prof, 'All styles') if prof != '*' else 'All styles'}: {detail}"
+                if line not in general:
+                    general.append(line)
+        out = []
+        if per_index:
+            out.append("Last check per index: " + "; ".join(f"{i} {r}" for i, r in sorted(per_index.items())))
+            top = sorted(counts.items(), key=lambda kv: -kv[1])[:3]
+            out.append("Most common reason: " + ", ".join(f"{k} ({n}x)" for k, n in top))
+        for prof, why in blocked.items():
+            out.append(f"{STYLE_NAMES.get(prof, prof)} stopped taking trades: {why}")
+        out.extend(general[-6:])
+        return out
 
     # ------------------------------------------------------------------ commands
     def cmd_status(self) -> str:
@@ -330,8 +372,10 @@ class Engine:
             if not ready:
                 return
 
+            names = (self.indices if any(b.profile.trade_indices for b in ready) else []) + \
+                    (self.stocks if any(b.profile.trade_stocks for b in ready) else [])
             signals = []
-            for idx in self.indices:
+            for idx in names:
                 if not self.inst.options.get(idx) or idx not in self.inst.spot_tokens:
                     continue
                 sig, why = signal(idx, get_candles(idx), d, scfg, self.playbook.get("indices", {}).get(idx))
@@ -342,7 +386,9 @@ class Engine:
             signals.sort(key=lambda s: -s.strength)
 
             for sig in signals:
-                books = [b for b in ready if sig.index not in b.traded_indices
+                is_stock = sig.index in self.stocks
+                books = [b for b in ready if (b.profile.trade_stocks if is_stock else b.profile.trade_indices)
+                         and sig.index not in b.traded_indices
                          and not any(p.index == sig.index for p in b.account.open)
                          and len(b.account.open) < b.profile.max_open_positions]
                 if not books:
@@ -354,10 +400,12 @@ class Engine:
                         self._note(b.profile.name, sig.index, "skip", "daily trend not strong in this direction")
                     elif sig.strength < b.profile.min_signal_strength:
                         self._note(b.profile.name, sig.index, "skip", f"breakout {sig.strength:.2f} ATR too weak")
+                    elif b.profile.style == "buy":
+                        self._enter_single(b, sig, now, d, scfg)
                     else:
                         eligible.append(b)
                 spot = self.data.index_ltp(sig.index) if eligible else None
-                step = self.cfg["indices"][sig.index]["strike_step"]
+                step = self.cfg["indices"].get(sig.index, {}).get("strike_step", 0)
                 cache: dict = {}
                 for b in eligible:
                     min_dte = b.profile.min_days_to_expiry or scfg["min_days_to_expiry"]
@@ -402,6 +450,41 @@ class Engine:
                             pos, b.profile.stop_pct, worst_loss_fraction(b.profile),
                             b.profile.max_hold_days if b.profile.hold_overnight else None, sig.reason))
 
+    def _enter_single(self, b: Book, sig, now: datetime, d: date, scfg: dict) -> None:
+        """Option-buying style: buy one call (up view) or put (down view), index or stock."""
+        is_stock = sig.index in self.stocks
+        min_dte = b.profile.min_days_to_expiry or scfg["min_days_to_expiry"]
+        expiry = pick_expiry(self.inst, sig.index, d, min_dte)
+        spot = self.data.index_ltp(sig.index)
+        if not expiry or not spot:
+            self._note(b.profile.name, sig.index, "skip", "no expiry or spot price")
+            return
+        contracts = single_candidates(self.inst, sig.index, sig.direction, spot, expiry)
+        if not contracts:
+            self._note(b.profile.name, sig.index, "skip", "strikes not found in instrument list")
+            return
+        q = self.data.quotes(contracts)
+        max_gap = (self.cfg.get("stocks") or {}).get("max_leg_spread_pct", 8.0) if is_stock else scfg["max_leg_spread_pct"]
+        slip = int(self.cfg.get("paper", {}).get("slippage_ticks", 1))
+        c, why = choose_single(contracts, q, b.profile, max_gap, slip)
+        if not c:
+            self._note(b.profile.name, sig.index, "skip", why)
+            return
+        lots = b.risk.size(c.cost_per_lot, c.cost_per_lot * worst_loss_fraction(b.profile), b.account.cash,
+                           b.account.capital_in_use())
+        if lots < 1:
+            self._note(b.profile.name, sig.index, "skip", f"size 0 (1 lot costs ₹{c.cost_per_lot:.0f})")
+            return
+        meta = {"signal": sig.reason, "strength": round(sig.strength, 2), "or_high": sig.or_high,
+                "or_low": sig.or_low, "spot": spot, "vix": self.vix, "kind": "stock" if is_stock else "index",
+                "trend_ok": True}
+        pos = self.broker.open_single(b.account, sig.index, sig.direction, c.buy, lots, q, meta)
+        if pos:
+            b.traded_indices.add(sig.index)
+            self.journal.trade(pos)
+            self.journal.decision(now, b.profile.name, sig.index, "enter", meta)
+            self.notify.send(entry_message(pos, b.profile.stop_pct, worst_loss_fraction(b.profile), None, sig.reason))
+
     # ------------------------------------------------------------------ split sessions (GitHub Actions)
     def _day_state_path(self):
         return self.cfg.data_dir / "state" / "day.json"
@@ -436,6 +519,8 @@ class Engine:
                         b.risk.state = DayState(day, float(r["peak_pnl"]), bool(r["locked"]), bool(r["stopped"]),
                                                 r.get("stop_reason", ""))
                         b.traded_indices = set(bs.get("traded", []))
+                    else:   # a style added since the morning: start its day now
+                        self.journal.start_day(day, b.profile.name, b.account.cash, self.playbook)
                 log.info("resumed session for %s", day)
                 return True
         self.start_day(day)
@@ -468,6 +553,10 @@ class Engine:
             self.save_day_state(ended=True)
             return report
         self.save_day_state()
+        if until.hour < 13:
+            why = self.why_summary(day)
+            if why:
+                self.notify.send("Midday check, why no new trade so far:\n" + "\n".join("• " + w for w in why))
         return None
 
     # ------------------------------------------------------------------ main loop

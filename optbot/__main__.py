@@ -45,7 +45,8 @@ def _load_instruments(cfg) -> Instruments:
     fresh = path.exists() and datetime.fromtimestamp(path.stat().st_mtime).date() == date.today()
     if not fresh:
         download_scrip_master(path)
-    return Instruments.from_file(path, cfg["indices"], cfg["vix"]["names"])
+    return Instruments.from_file(path, cfg["indices"], cfg["vix"]["names"],
+                                 (cfg.get("stocks") or {}).get("names") or [])
 
 
 def cmd_check(args) -> int:

@@ -82,8 +82,11 @@ def position_from_dict(d: dict) -> Position:
 def liquidation_value(p: Position, quotes: dict[str, Quote]) -> float | None:
     """Per-unit value if the spread were closed now: sell the long leg at bid, buy back the short at ask."""
     long_leg = next(l for l in p.legs if l.side == "BUY")
-    short_leg = next(l for l in p.legs if l.side == "SELL")
-    ql, qs = quotes.get(long_leg.contract.token), quotes.get(short_leg.contract.token)
+    short_leg = next((l for l in p.legs if l.side == "SELL"), None)
+    ql = quotes.get(long_leg.contract.token)
+    if short_leg is None:   # a single bought option: worth its bid
+        return ql.bid if ql and ql.bid > 0 else None
+    qs = quotes.get(short_leg.contract.token)
     if not ql or not qs or ql.bid <= 0 or qs.ask <= 0:
         return None
     return max(0.0, ql.bid - qs.ask)
@@ -129,9 +132,45 @@ class PaperBroker:
         acct.save()
         return pos
 
+    def open_single(self, acct: PaperAccount, index: str, direction: str, buy: Contract, lots: int,
+                    quotes: dict[str, Quote], meta: dict) -> Position | None:
+        """Buy one option (call for an up view, put for a down view). Most it can lose is what was paid."""
+        qb = quotes.get(buy.token)
+        if not qb:
+            return None
+        qty = lots * buy.lot_size
+        pb = self._fill(buy, "BUY", qb)
+        ch = order_charges(self.charges_cfg, buy.segment, "BUY", pb, qty)
+        cost = pb * qty + ch
+        if cost > acct.cash:
+            log.info("[%s] not enough cash for %s (need %.0f, have %.0f)", acct.profile, index, cost, acct.cash)
+            return None
+        pos = Position(
+            id=uuid.uuid4().hex[:8], profile=acct.profile, index=index, direction=direction,
+            legs=[Leg(buy, "BUY", qty, pb)], lots=lots, entry_time=self.clock.now(), entry_debit=pb, width=0.0,
+            entry_charges=round(ch, 2), peak_value=pb, meta=meta,
+        )
+        acct.cash -= cost
+        acct.open.append(pos)
+        acct.save()
+        return pos
+
     def close_position(self, acct: PaperAccount, pos: Position, quotes: dict[str, Quote], reason: str) -> bool:
         long_leg = next(l for l in pos.legs if l.side == "BUY")
-        short_leg = next(l for l in pos.legs if l.side == "SELL")
+        short_leg = next((l for l in pos.legs if l.side == "SELL"), None)
+        if short_leg is None:
+            ql = quotes.get(long_leg.contract.token)
+            if not ql:
+                return False
+            p_long = self._fill(long_leg.contract, "SELL", ql)
+            ch = order_charges(self.charges_cfg, long_leg.contract.segment, "SELL", p_long, pos.qty)
+            long_leg.exit_price = p_long
+            pos.exit_value, pos.exit_charges = p_long, round(ch, 2)
+            pos.exit_time, pos.exit_reason = self.clock.now(), reason
+            acct.cash += p_long * pos.qty - ch
+            acct.open = [p for p in acct.open if p.id != pos.id]
+            acct.save()
+            return True
         ql, qs = quotes.get(long_leg.contract.token), quotes.get(short_leg.contract.token)
         if not ql or not qs:
             return False

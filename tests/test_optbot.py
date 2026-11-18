@@ -246,3 +246,62 @@ def test_trail_tightens_on_big_gains():
     # +198% gain: may give back only 10% of the 79-point gain -> stop at about 111
     assert p.meta["trail_stop"] >= 110
     assert "trailing stop" in exit_reason(p, 110.0, t, profile("target_5k"), mkt, [], CFG["strategy"])
+
+
+def test_report_explains_why_no_trade(tmp_path):
+    from optbot.engine import Engine
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    clock = SimClock(datetime(2026, 11, 18, 11, 0, tzinfo=IST))
+    eng = Engine(cfg, None, None, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.day = date(2026, 11, 18)
+    eng._note("*", "NIFTY", "no-signal", "inside opening range")
+    eng._note("*", "BANKNIFTY", "no-signal", "breakout up 0.12 ATR outside band")
+    eng._note("swing", "*", "blocked", "1 loser today")
+    why = eng.why_summary()
+    text = "\n".join(why)
+    assert "NIFTY inside opening range" in text and "Swing (1-2 days) stopped taking trades: 1 loser today" in text
+    assert "Why it did not trade more today" in eng.report()
+
+
+def test_instruments_load_stock_options_and_spot():
+    from optbot.instruments import Instruments
+    rows = [
+        {"token": "2885", "symbol": "RELIANCE-EQ", "name": "RELIANCE", "exch_seg": "NSE", "instrumenttype": "",
+         "expiry": "", "strike": "-1", "lotsize": "1", "tick_size": "10"},
+        {"token": "111", "symbol": "RELIANCE29DEC261400CE", "name": "RELIANCE", "exch_seg": "NFO",
+         "instrumenttype": "OPTSTK", "expiry": "29DEC2026", "strike": "140000.000000", "lotsize": "500", "tick_size": "5"},
+        {"token": "112", "symbol": "RELIANCE29DEC261420CE", "name": "RELIANCE", "exch_seg": "NFO",
+         "instrumenttype": "OPTSTK", "expiry": "29DEC2026", "strike": "142000.000000", "lotsize": "500", "tick_size": "5"},
+    ]
+    inst = Instruments(rows, CFG["indices"], CFG["vix"]["names"], ["RELIANCE"])
+    assert inst.spot_tokens["RELIANCE"] == ("NSE", "2885")
+    assert len(inst.options["RELIANCE"]) == 2 and inst.lot_size("RELIANCE") == 500
+    from optbot.strategy import single_candidates
+    picks = single_candidates(inst, "RELIANCE", "long", 1405.0, date(2026, 12, 29))
+    assert [c.strike for c in picks] == [1400.0, 1420.0]
+
+
+def test_single_option_round_trip_and_exits(tmp_path):
+    from optbot.messages import entry_message, exit_message
+    from optbot.strategy import choose_single
+    acct = PaperAccount("option_buyer", 20000, tmp_path / "b.json")
+    broker = PaperBroker(CFG["charges"], {"slippage_ticks": 1}, SimClock(datetime(2026, 11, 18, 10, 0, tzinfo=IST)))
+    c = _contract(26000, "CE", "T1")
+    prof = profile("option_buyer")
+    cand, why = choose_single([c], {"T1": Quote("T1", 100, 99.5, 100.5)}, prof, 5.0, 1)
+    assert cand and cand.cost_per_lot <= 8000
+    pos = broker.open_single(acct, "NIFTY", "long", c, 1, {"T1": Quote("T1", 100, 99.5, 100.5)}, {})
+    assert pos and len(pos.legs) == 1 and pos.width == 0
+    assert "Place this 1 order" in entry_message(pos, 0.3, 1.0, None, "test")
+    assert liquidation_value(pos, {"T1": Quote("T1", 150, 149.5, 150.5)}) == 149.5
+    cal = MarketCalendar(CFG["market"])
+    now = datetime(2026, 11, 18, 11, 0, tzinfo=IST)
+    assert exit_reason(pos, 150.0, now, prof, cal, [], CFG["strategy"]) is None   # no "max profit" cap on a bought option
+    assert broker.close_position(acct, pos, {"T1": Quote("T1", 150, 149.5, 150.5)}, "test")
+    assert pos.realized_pnl() > 0 and "SELL NIFTY" in exit_message(pos, "test")
+    too_dear, why = choose_single([c], {"T1": Quote("T1", 200, 199.5, 200.5)}, prof, 5.0, 1)
+    assert too_dear is None and "above" in why

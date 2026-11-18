@@ -37,6 +37,10 @@ class Profile:
     min_days_to_expiry: int | None = None  # overrides strategy.min_days_to_expiry for this profile
     min_trend_confidence: float = 0.0      # daily trend confidence (0-1) needed to enter
     min_signal_strength: float = 0.0       # intraday breakout strength (ATRs) needed to enter
+    # "spread" buys one option and sells another (capped risk, capped profit). "buy" buys one option only.
+    style: str = "spread"
+    trade_indices: bool = True
+    trade_stocks: bool = False             # stock options from the `stocks` list (style "buy" only)
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> "Profile":

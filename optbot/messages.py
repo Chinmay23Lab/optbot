@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from .models import Position
 
-STYLE_NAMES = {"conservative": "Safe", "target_5k": "₹5k target", "swing": "Swing (1-2 days)"}
+STYLE_NAMES = {"conservative": "Safe", "target_5k": "₹5k target", "swing": "Swing (1-2 days)",
+               "option_buyer": "Option buying"}
 
 
 def _style(profile: str) -> str:
@@ -15,9 +16,34 @@ def _leg_name(c) -> str:
     return f"{c.index} {c.expiry:%d %b} {strike} {c.right}"
 
 
+def _single_entry(pos: Position, buy, stop_pct: float, why: str) -> str:
+    up = pos.direction == "long"
+    lot = buy.contract.lot_size
+    stop_at = pos.entry_debit * (1 - stop_pct)
+    kind = "stock" if pos.meta.get("kind") == "stock" else "index"
+    return "\n".join([
+        f"{'📈' if up else '📉'} NEW PAPER TRADE ({_style(pos.profile)})",
+        f"View: {pos.index} ({kind}) likely to go {'UP' if up else 'DOWN'}",
+        "",
+        "Place this 1 order:",
+        f"BUY {_leg_name(buy.contract)} @ ₹{buy.entry_price:.2f}",
+        f"Quantity: {pos.lots} lot{'s' if pos.lots > 1 else ''} = {pos.qty}" + (f" (1 lot = {lot})" if pos.lots > 1 else ""),
+        "",
+        f"Cost: ₹{pos.entry_debit:.2f} × {pos.qty} = ₹{pos.cost:,.0f} (no extra margin when only buying)",
+        f"Stop: exits if the option falls to ₹{stop_at:.2f} (loss ≈ ₹{pos.cost * stop_pct:,.0f})",
+        "Profit: no cap. A trailing stop follows the price up and locks in more as it rises.",
+        f"Most it can ever lose: ₹{pos.cost:,.0f} (what you paid)",
+        "",
+        f"Why: {why}",
+        "This is a paper (practice) trade: the bot is still being tested.",
+    ])
+
+
 def entry_message(pos: Position, stop_pct: float, worst_fraction: float, hold_days: int | None, why: str) -> str:
     buy = next(l for l in pos.legs if l.side == "BUY")
-    sell = next(l for l in pos.legs if l.side == "SELL")
+    sell = next((l for l in pos.legs if l.side == "SELL"), None)
+    if sell is None:
+        return _single_entry(pos, buy, stop_pct, why)
     lot = buy.contract.lot_size
     up = pos.direction == "long"
     max_profit = (pos.width - pos.entry_debit) * pos.qty - pos.entry_charges
@@ -48,8 +74,15 @@ def entry_message(pos: Position, stop_pct: float, worst_fraction: float, hold_da
 
 def exit_message(pos: Position, reason: str) -> str:
     buy = next(l for l in pos.legs if l.side == "BUY")
-    sell = next(l for l in pos.legs if l.side == "SELL")
+    sell = next((l for l in pos.legs if l.side == "SELL"), None)
     pnl = pos.realized_pnl()
+    if sell is None:
+        return "\n".join([
+            f"{'✅' if pnl >= 0 else '❌'} CLOSED ({_style(pos.profile)}): {pos.index} ₹{pnl:+,.0f} after charges",
+            f"Reason: {reason}",
+            f"SELL {_leg_name(buy.contract)} @ ₹{(buy.exit_price or 0):.2f}",
+            f"Quantity: {pos.qty}",
+        ])
     return "\n".join([
         f"{'✅' if pnl >= 0 else '❌'} CLOSED ({_style(pos.profile)}): {pos.index} ₹{pnl:+,.0f} after charges",
         f"Reason: {reason}",

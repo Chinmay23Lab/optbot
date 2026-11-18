@@ -30,6 +30,12 @@ indices:
   SENSEX:    {segment: BFO, spot_exchange: BSE, spot_names: ["SENSEX", "Sensex"],           strike_step: 100}
   BANKEX:    {segment: BFO, spot_exchange: BSE, spot_names: ["BANKEX", "Bankex"],           strike_step: 100}
 
+# Stock options the "Option buying" style may trade (NSE F&O stocks with busy option markets).
+# Lot sizes, strikes and expiries come from Angel One's instrument file each morning.
+stocks:
+  names: [RELIANCE, HDFCBANK, ICICIBANK, SBIN, INFY, TCS, AXISBANK, KOTAKBANK, BHARTIARTL, LT]
+  max_leg_spread_pct: 8.0      # stock options have wider bid/ask gaps than index options
+
 vix:
   names: ["India VIX", "INDIA VIX"]
   max_for_entry: 25    # no new entries above this VIX
@@ -125,6 +131,33 @@ profiles:
     min_days_to_expiry: 4        # use an expiry far enough out that the hold never runs into it
     min_trend_confidence: 0.30   # daily trend must be clearly up (for calls) or down (for puts)
     min_signal_strength: 0.30    # and the day's breakout must be decent, not marginal
+
+  option_buyer:
+    # Buys one option only (a call when the bot expects a rise, a put for a fall), on indices AND stocks.
+    # Simple, no margin, unlimited upside, but time decay works against it every minute it is held.
+    capital: 20000
+    style: buy
+    trade_indices: true
+    trade_stocks: true
+    max_lots: 2
+    max_debit_per_lot: 8000      # most premium paid for 1 lot
+    max_risk_per_trade: 2500
+    stop_pct: 0.30               # exit if the option loses 30% of what was paid
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 0.25      # once up 25%, a trailing stop follows the price
+    trail_giveback_pct: 0.30
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.80
+    continue_after_target: true
+    daily_loss_cap: 2500
+    max_losing_trades_per_day: 2
+    weekly_loss_cap: 5000
+    account_floor: 15000
+    max_open_positions: 2
+    max_trades_per_day: 4
+    max_capital_in_use_pct: 0.80
+    min_days_to_expiry: 2        # avoid options in their last day or two, when decay is fastest
 
 # Charges applied to every simulated order (Angel One + exchange + taxes).
 # Verify against Angel One's brokerage calculator; edit if rates change.

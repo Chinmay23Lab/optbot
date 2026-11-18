@@ -44,9 +44,10 @@ def _parse_expiry(s: str) -> date | None:
 class Instruments:
     """Index option chains and spot tokens built from the scrip master rows."""
 
-    def __init__(self, rows: list[dict], index_cfg: dict, vix_names: list[str]):
+    def __init__(self, rows: list[dict], index_cfg: dict, vix_names: list[str], stocks: list[str] | None = None):
         self.index_cfg = index_cfg
-        self.options: dict[str, list[Contract]] = {k: [] for k in index_cfg}
+        self.stocks = [s.upper() for s in (stocks or [])]
+        self.options: dict[str, list[Contract]] = {k: [] for k in [*index_cfg, *self.stocks]}
         self.spot_tokens: dict[str, tuple[str, str]] = {}  # index -> (exchange, token)
         self.vix_token: tuple[str, str] | None = None
         wanted_spot = {}
@@ -59,9 +60,9 @@ class Instruments:
             seg = r.get("exch_seg")
             itype = r.get("instrumenttype", "")
             name = (r.get("name") or "").upper()
-            if itype == "OPTIDX" and seg in ("NFO", "BFO") and name in self.options:
-                if index_cfg[name]["segment"] != seg:
-                    continue
+            is_idx = itype == "OPTIDX" and name in index_cfg and index_cfg[name]["segment"] == seg
+            is_stk = itype == "OPTSTK" and seg == "NFO" and name in self.stocks
+            if is_idx or is_stk:
                 exp = _parse_expiry(r.get("expiry", ""))
                 if exp is None:
                     continue
@@ -84,6 +85,9 @@ class Instruments:
                 )
             elif seg in ("NSE", "BSE") and itype in ("AMXIDX", "INDEX", ""):
                 sym_u = (r.get("symbol") or "").upper()
+                if seg == "NSE" and sym_u.endswith("-EQ") and sym_u[:-3] in self.stocks:
+                    self.spot_tokens.setdefault(sym_u[:-3], (seg, str(r["token"])))
+                    continue
                 for key in ((seg, sym_u), (seg, name)):
                     if key in wanted_spot and wanted_spot[key] not in self.spot_tokens:
                         self.spot_tokens[wanted_spot[key]] = (seg, str(r["token"]))
@@ -99,8 +103,9 @@ class Instruments:
             log.info("instruments: %s %d option contracts, spot=%s", k, len(v), self.spot_tokens.get(k))
 
     @classmethod
-    def from_file(cls, path: Path, index_cfg: dict, vix_names: list[str]) -> "Instruments":
-        return cls(json.loads(path.read_text()), index_cfg, vix_names)
+    def from_file(cls, path: Path, index_cfg: dict, vix_names: list[str],
+                  stocks: list[str] | None = None) -> "Instruments":
+        return cls(json.loads(path.read_text()), index_cfg, vix_names, stocks)
 
     def expiries(self, index: str) -> list[date]:
         return sorted({c.expiry for c in self.options[index]})
@@ -110,6 +115,9 @@ class Instruments:
 
     def lot_size(self, index: str) -> int | None:
         return self.options[index][0].lot_size if self.options[index] else None
+
+    def strikes(self, index: str, expiry: date) -> list[float]:
+        return sorted({c.strike for c in self.options[index] if c.expiry == expiry})
 
     def find(self, index: str, expiry: date, strike: float, right: str) -> Contract | None:
         for c in self.options[index]:

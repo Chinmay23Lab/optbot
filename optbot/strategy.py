@@ -123,6 +123,51 @@ def build_candidates(buy: Contract, sells: list[Contract], quotes: dict[str, Quo
     return out
 
 
+@dataclass
+class SingleCandidate:
+    buy: Contract
+    price: float
+    lot_size: int
+
+    @property
+    def cost_per_lot(self) -> float:
+        return self.price * self.lot_size
+
+
+def single_candidates(inst: Instruments, name: str, direction: str, spot: float, expiry: date) -> list[Contract]:
+    """At-the-money option, then up to 2 strikes out of the money (cheaper), nearest first."""
+    right = "CE" if direction == "long" else "PE"
+    strikes = inst.strikes(name, expiry)
+    if not strikes:
+        return []
+    atm_i = min(range(len(strikes)), key=lambda i: abs(strikes[i] - spot))
+    sign = 1 if direction == "long" else -1
+    out = []
+    for k in range(0, 3):
+        i = atm_i + sign * k
+        if 0 <= i < len(strikes) and (c := inst.find(name, expiry, strikes[i], right)):
+            out.append(c)
+    return out
+
+
+def choose_single(contracts: list[Contract], quotes: dict[str, Quote], profile: Profile, max_spread_pct: float,
+                  slip_ticks: int) -> tuple[SingleCandidate | None, str]:
+    """Nearest-to-the-money liquid option whose 1-lot cost fits the profile's caps."""
+    cap = min(profile.max_debit_per_lot, profile.max_risk_per_trade / worst_loss_fraction(profile))
+    cheapest = None
+    for c in contracts:
+        q = quotes.get(c.token)
+        if not q or q.ask <= 0 or q.spread_pct() > max_spread_pct:
+            continue
+        cand = SingleCandidate(c, round(q.ask + slip_ticks * c.tick, 2), c.lot_size)
+        if cand.cost_per_lot <= cap:
+            return cand, "ok"
+        cheapest = min(cheapest or cand.cost_per_lot, cand.cost_per_lot)
+    if cheapest is None:
+        return None, "no option with a tight enough bid/ask gap"
+    return None, f"1 lot costs ₹{cheapest:,.0f}, above the ₹{cap:,.0f} cap"
+
+
 def worst_loss_fraction(profile: Profile) -> float:
     """Share of the debit that can be lost. Overnight holds can gap past the stop, so assume all of it."""
     return 1.0 if profile.hold_overnight else profile.stop_pct
@@ -183,9 +228,9 @@ def exit_reason(pos: Position, value: float, now: datetime, profile: Profile, ma
         return "expiry-day exit"
     if value <= debit * (1 - profile.stop_pct):
         return f"stop loss ({profile.stop_pct:.0%} of debit)"
-    if value >= 0.95 * pos.width:
+    if pos.width > 0 and value >= 0.95 * pos.width:
         return "near max profit"
-    if profile.exit_mode == "target" and profile.target_pct_of_max_profit:
+    if profile.exit_mode == "target" and profile.target_pct_of_max_profit and pos.width > 0:
         if value >= debit + profile.target_pct_of_max_profit * (pos.width - debit):
             return "profit target"
     if gain >= profile.trail_trigger_pct:
