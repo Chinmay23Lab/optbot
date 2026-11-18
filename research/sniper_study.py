@@ -144,6 +144,61 @@ def htf_dir(bars15: list[Bar], bars_h: list[Bar], minutes: int) -> list[int]:
     return out
 
 
+def sma(xs, n):
+    out, run = [], 0.0
+    for i, x in enumerate(xs):
+        run += x - (xs[i - n] if i >= n else 0)
+        out.append(run / min(i + 1, n))
+    return out
+
+
+def rsi(xs, n=14):
+    out, g, l = [50.0], None, None
+    for i in range(1, len(xs)):
+        ch = xs[i] - xs[i - 1]
+        up, dn = max(ch, 0), max(-ch, 0)
+        g = up if g is None else g + (up - g) / n
+        l = dn if l is None else l + (dn - l) / n
+        out.append(100.0 if l == 0 else 100 - 100 / (1 + g / l))
+    return out
+
+
+def a15_for(bars):
+    return atr(bars, 10)
+
+
+def supertrend_dir(bars, a, mult):
+    out, d, up_b, dn_b = [], 1, None, None
+    for i, b in enumerate(bars):
+        mid = (b.h + b.l) / 2
+        ub, lb = mid + mult * a[i], mid - mult * a[i]
+        if i == 0:
+            up_b, dn_b = ub, lb
+        else:
+            up_b = ub if ub < up_b or bars[i - 1].c > up_b else up_b
+            dn_b = lb if lb > dn_b or bars[i - 1].c < dn_b else dn_b
+            if d == 1 and b.c < dn_b:
+                d = -1
+            elif d == -1 and b.c > up_b:
+                d = 1
+        out.append(d)
+    return out
+
+
+def pivots(bars):
+    """Standard pivot (H+L+C)/3 of the previous session, for each bar."""
+    out, prev, cur_day, h, l, c = [], None, None, None, None, None
+    for b in bars:
+        day = b.ts.date()
+        if day != cur_day:
+            if cur_day is not None:
+                prev = (h + l + c) / 3
+            cur_day, h, l = day, b.h, b.l
+        h, l, c = max(h, b.h), min(l, b.l), b.c
+        out.append(prev)
+    return out
+
+
 # ----------------------------------------------------------------------------------------- signals
 def make_signals(b15, b30, b60):
     c = [b.c for b in b15]
@@ -162,7 +217,25 @@ def make_signals(b15, b30, b60):
     def trend(i, d):
         return (c[i] > e100[i] and c[i] > e200[i]) if d == 1 else (c[i] < e100[i] and c[i] < e200[i])
 
+    # Confirmations Chinmay says the indicator combines: MACD, RSI, Supertrend, VWMA, standard pivot points.
+    # Index candles carry no volume, so VWMA is approximated by a 20-bar simple average.
+    ml = [a - b for a, b in zip(ema(c, 12), ema(c, 26))]
+    hist = [a - b for a, b in zip(ml, ema(ml, 9))]
+    r = rsi(c, 14)
+    st = supertrend_dir(b15, a15_for(b15), 3.0)
+    vw = sma(c, 20)
+    piv = pivots(b15)
+
+    def confirms(i, d):
+        checks = [hist[i] * d > 0, (r[i] - 50) * d > 0, st[i] == d, (c[i] - vw[i]) * d > 0,
+                  piv[i] is not None and (c[i] - piv[i]) * d > 0]
+        return sum(checks)
+
     return {
+        "D cross + all 5 (MACD, RSI, Supertrend, VWMA, pivot)": lambda i: (d if (d := cross(i)) and confirms(i, d) == 5 else 0),
+        "E cross + trend + 4 of 5 confirmations": lambda i: (d if (d := cross(i)) and trend(i, d) and confirms(i, d) >= 4 else 0),
+        "F everything: C + all 5 confirmations": lambda i: (d if (d := cross(i)) and trend(i, d) and d30[i] == d
+                                                             and d60[i] == d and confirms(i, d) == 5 else 0),
         "A band cross": lambda i: cross(i),
         "B cross + 100/200 trend": lambda i: (d if (d := cross(i)) and trend(i, d) else 0),
         "C cross + trend + 30m/1h agree": lambda i: (d if (d := cross(i)) and trend(i, d)
@@ -284,7 +357,7 @@ def analyze(data: Path, test_days: int = 250) -> str:
                 cb = combined.setdefault(key, [])
                 cb += [(t, lot, COST_RS[kind]) for t in test]
     lines = ["# Sniper-style signals: 3-year test", "",
-             f"Rebuilt from the visible rules of Sniper Short 2.0. Test period = last {test_days} trading days, "
+             f"Rebuilt from the visible rules of Sniper Short 2.0 plus the indicators it combines (EMA, MACD, RSI, Supertrend, VWMA, pivots). Test period = last {test_days} trading days, "
              "never used to pick settings. Rupees per lot of an at-the-money option bought, after charges.", ""]
     lines += ["## All names together, test period (best settings first)", "",
               "| Signal | SL (ATR) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |",
@@ -302,16 +375,16 @@ def analyze(data: Path, test_days: int = 250) -> str:
         s, sl, mode, md = key
         lines.append(f"| {s} | {sl} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
                      f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} |")
-    lines += ["", "## Per name (test period), signal C with each name's best settings", "",
+    lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
     for name in lots:
-        best = [r for r in rows if r[0] == name and r[2][0].startswith("C")]
+        best = [r for r in rows if r[0] == name and not r[2][0].startswith("Random")]
         if not best:
             continue
         r = max(best, key=lambda r: r[3]["rs"])   # chosen on TRAIN, reported on TEST
         te = r[4]
         _, sl, mode, md = r[2]
-        lines.append(f"| {name} | SL {sl}, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
+        lines.append(f"| {name} | {r[2][0].split()[0]}, SL {sl}, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
                      f"{te['rs']:+,.0f} | {te['total']:+,.0f} | {te['t']:.1f} |")
     lines += ["", "t of 2 or more = unlikely to be luck. Random entries with the same SL/TP show what a hit rate "
               "is worth on its own: with TP1 at 2x the stop, about 33% is what chance gives."]
