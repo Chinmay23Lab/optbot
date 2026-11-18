@@ -260,7 +260,7 @@ class Trade:
     price: float = 0.0
 
 
-def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int = 15) -> list[Trade]:
+def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int = 15, tp_step: float = 2.0) -> list[Trade]:
     """mode 'tp1': exit everything at TP1. mode 'run': at TP1 move SL to entry, then exit at TP3 or stop."""
     trades, n, i = [], len(b15), 0
     busy_until = -1
@@ -275,7 +275,7 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int =
             i += 1
             continue
         entry, risk = b.c, sl_atr * a15[i]
-        stop, tp1, tp3 = entry - d * risk, entry + d * 2 * risk, entry + d * 6 * risk
+        stop, tp1, tp3 = entry - d * risk, entry + d * tp_step * risk, entry + d * 3 * tp_step * risk
         hit1, exit_px, days, last_day, m = False, None, 1, b.ts.date(), i + 1
         while m < n:
             x = b15[m]
@@ -333,7 +333,8 @@ def analyze(data: Path, test_days: int = 250) -> str:
     for line in (data / "lots.csv").read_text().splitlines():
         k, lot, kind = line.split(",")
         lots[k] = (int(lot), kind)
-    variants = [(sl, mode, md) for sl in (1.0, 1.5) for mode in ("tp1", "run") for md in (1, 3)]
+    # TP spacing seen on Chinmay's screenshots: about 1.3x the stop distance (NIFTY) and 2x (Bharti Airtel)
+    variants = [(sl, mode, md, tp) for sl in (1.0, 1.5) for mode in ("tp1", "run") for md in (1, 3) for tp in (1.3, 2.0)]
     rows, combined = [], {}
     for name, (lot, kind) in lots.items():
         p = data / f"{name}_5m.csv"
@@ -350,11 +351,11 @@ def analyze(data: Path, test_days: int = 250) -> str:
             sigs = make_signals(bt, resample(b5, h1), resample(b5, h2), h1, h2, tf)
             sigs["Random entries (baseline)"] = random_signals()
             for sname, fn in sigs.items():
-                for sl, mode, md in variants:
-                    tr = backtest(bt, at, fn, sl, mode, md, tf)
+                for sl, mode, md, tp in variants:
+                    tr = backtest(bt, at, fn, sl, mode, md, tf, tp)
                     train = [t for t in tr if t.day < cut]
                     test = [t for t in tr if t.day >= cut]
-                    key = (f"{tf}m {sname}", sl, mode, md)
+                    key = (f"{tf}m {sname}", sl, mode, md, tp)
                     st_tr, st_te = stats(train, lot, COST_RS[kind]), stats(test, lot, COST_RS[kind])
                     rows.append((name, kind, key, st_tr, st_te))
                     cb = combined.setdefault(key, [])
@@ -363,8 +364,8 @@ def analyze(data: Path, test_days: int = 250) -> str:
              f"Rebuilt from the visible rules of Sniper Short 2.0 plus the indicators it combines (EMA, MACD, RSI, Supertrend, VWMA, pivots). Test period = last {test_days} trading days, "
              "never used to pick settings. Rupees per lot of an at-the-money option bought, after charges.", ""]
     lines += ["## All names together, test period: top 30 signal settings, then the best random baselines", "",
-              "| Signal | SL (ATR) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |",
-              "|---|---|---|---|---|---|---|---|---|---|"]
+              "| Signal | SL (ATR) | TP step (x SL) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |",
+              "|---|---|---|---|---|---|---|---|---|---|---|"]
     agg = []
     for key, items in combined.items():
         rs = [rupees(t, lot, cost) for t, lot, cost in items]
@@ -377,8 +378,8 @@ def analyze(data: Path, test_days: int = 250) -> str:
     ranked = sorted([r for r in agg if r[1] >= 30], key=lambda r: -r[4])   # too few trades proves nothing
     shown = [r for r in ranked if "Random" not in r[0][0]][:30] + [r for r in ranked if "Random" in r[0][0]][:5]
     for key, n, tp1, win, mean, tot, t in shown:
-        s, sl, mode, md = key
-        lines.append(f"| {s} | {sl} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
+        s, sl, mode, md, tp = key
+        lines.append(f"| {s} | {sl} | {tp} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
                      f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} |")
     lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
@@ -388,11 +389,11 @@ def analyze(data: Path, test_days: int = 250) -> str:
             continue
         r = max(best, key=lambda r: r[3]["rs"])   # chosen on TRAIN, reported on TEST
         te = r[4]
-        _, sl, mode, md = r[2]
-        lines.append(f"| {name} | {' '.join(r[2][0].split()[:2])}, SL {sl}, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
+        _, sl, mode, md, tp = r[2]
+        lines.append(f"| {name} | {' '.join(r[2][0].split()[:2])}, SL {sl}, TP {tp}x, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
                      f"{te['rs']:+,.0f} | {te['total']:+,.0f} | {te['t']:.1f} |")
     lines += ["", "t of 2 or more = unlikely to be luck. Random entries with the same SL/TP show what a hit rate "
-              "is worth on its own: with TP1 at 2x the stop, about 33% is what chance gives."]
+              "is worth on its own: with TP1 at 2x the stop about 33% is what chance gives, at 1.3x about 43%."]
     return "\n".join(lines)
 
 
