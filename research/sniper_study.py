@@ -166,6 +166,15 @@ def rupees(t: Trade, lot: int, cost_rs: float) -> float:
     return t.pts * OPTION_DELTA * lot - cost_rs - t.nights * THETA_PER_NIGHT * t.price * lot
 
 
+def train_summary(items) -> str:
+    rs = [rupees(t, lot, cost) for t, lot, cost in items]
+    if len(rs) < 2:
+        return "-"
+    mean = sum(rs) / len(rs)
+    sd = math.sqrt(sum((x - mean) ** 2 for x in rs) / (len(rs) - 1))
+    return f"{mean:+,.0f} ({mean / (sd / math.sqrt(len(rs))) if sd else 0:.1f}, n={len(rs)})"
+
+
 def stats(tr: list[Trade], lot: int, cost_rs: float) -> dict:
     if not tr:
         return {"n": 0, "tp1": 0.0, "win": 0.0, "rs": 0.0, "total": 0.0, "t": 0.0}
@@ -184,7 +193,7 @@ def analyze(data: Path, test_days: int = 250) -> str:
         lots[k] = (int(lot), kind)
     # TP spacing seen on Chinmay's screenshots: about 1.3x the stop distance (NIFTY) and 2x (Bharti Airtel)
     variants = [(sl, mode, md, tp) for sl in (1.0, 1.5) for mode in ("tp1", "run") for md in (1, 3) for tp in (1.3, 2.0)]
-    rows, combined = [], {}
+    rows, combined, combined_train = [], {}, {}
     for name, (lot, kind) in lots.items():
         p = data / f"{name}_5m.csv"
         if not p.exists() or lot <= 0:
@@ -209,12 +218,13 @@ def analyze(data: Path, test_days: int = 250) -> str:
                     rows.append((name, kind, key, st_tr, st_te))
                     cb = combined.setdefault(key, [])
                     cb += [(t, lot, COST_RS[kind]) for t in test]
+                    combined_train.setdefault(key, []).extend((t, lot, COST_RS[kind]) for t in train)
     lines = ["# Sniper-style signals: 3-year test", "",
              f"Rebuilt from the visible rules of Sniper Short 2.0 plus the indicators it combines (EMA, MACD, RSI, Supertrend, VWMA, pivots). Test period = last {test_days} trading days, "
              "never used to pick settings. Rupees per lot of an at-the-money option bought, after charges.", ""]
     lines += ["## All names together, test period: top 30 signal settings, then the best random baselines", "",
-              "| Signal | SL (ATR) | TP step (x SL) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |",
-              "|---|---|---|---|---|---|---|---|---|---|---|"]
+              "| Signal | SL (ATR) | TP step (x SL) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t | Older 2 years: ₹/trade (t) |",
+              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     agg = []
     for key, items in combined.items():
         rs = [rupees(t, lot, cost) for t, lot, cost in items]
@@ -229,7 +239,7 @@ def analyze(data: Path, test_days: int = 250) -> str:
     for key, n, tp1, win, mean, tot, t in shown:
         s, sl, mode, md, tp = key
         lines.append(f"| {s} | {sl} | {tp} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
-                     f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} |")
+                     f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} | {train_summary(combined_train.get(key, []))} |")
     lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
     for name in lots:
