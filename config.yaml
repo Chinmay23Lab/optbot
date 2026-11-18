@@ -142,7 +142,7 @@ profiles:
     # (+₹147/trade, n=641). Weak (t≈1), so this is a live paper test, not a proven edge. Rule E (15m) was dropped on
     # 18 Nov: +₹175/trade last year but −₹214/trade (t=−3.8) over the older 2 years.
     entry_signal: sniper
-    sniper: {rule: D, tf: 60, sl_atr: 1.5, tp_step: 2.0, exit: tp1}
+    sniper: {rule: G, tf: 60, sl_atr: 1.5, tp_step: 2.0, exit: tp1}
     trade_indices: true
     trade_stocks: true
     max_lots: 2
