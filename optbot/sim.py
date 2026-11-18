@@ -122,6 +122,28 @@ class SimMarket:
                 for k in range(6)]
         return warm + out
 
+    def history_candles(self, name: str, days: int) -> list[Candle]:
+        """Synthetic past 5-minute candles (random walk ending at today's open) plus today's candles."""
+        day = self.clock.now().date()
+        today = [c for c in self.intraday_candles(name, day) if c.ts.date() == day]
+        key = (name, day, days)
+        cache = getattr(self, "_hist", {})
+        self._hist = cache
+        if key not in cache:
+            rnd = random.Random(hash(key) & 0xFFFF)
+            p = today[0].open if today else self._spot(name, self.clock.now())
+            bars, d = [], day - timedelta(days=1)
+            while len(bars) < days * 75 * 5 // 7:
+                if d.weekday() < 5:
+                    t = datetime.combine(d, datetime.min.time(), tzinfo=IST).replace(hour=15, minute=25)
+                    for k in range(75):
+                        c = p
+                        p = p / (1 + rnd.gauss(0, 0.0012))
+                        bars.append(Candle(t - timedelta(minutes=5 * k), p, max(p, c) * 1.0003, min(p, c) * 0.9997, c))
+                d -= timedelta(days=1)
+            cache[key] = sorted(bars, key=lambda b: b.ts)
+        return cache[key] + today
+
     def quotes(self, contracts: list[Contract]) -> dict[str, Quote]:
         now = self.clock.now()
         out = {}

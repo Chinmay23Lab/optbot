@@ -329,3 +329,32 @@ def test_tv_command_paper_trades_your_signal(tmp_path):
     eng.cmd_tv("NIFTY down")   # flip: closes the call, buys a put
     assert [p.legs[0].contract.right for p in tv.account.open] == ["PE"]
     assert all(not b.account.open for b in eng.books if b.profile.name != "tradingview")
+
+
+def test_sniper_live_signal_matches_backtest_rules_without_lookahead():
+    import random as _r
+    from datetime import timedelta
+    from optbot.sniper_rules import Bar, live_signal, make_signals, resample
+    rnd = _r.Random(4)
+    p, c5, d = 22000.0, [], date(2026, 9, 1)
+    while len(c5) < 75 * 40:
+        if d.weekday() < 5:
+            for k in range(75):
+                o = p
+                p *= 1 + rnd.gauss(0, 0.0015)
+                t = datetime(d.year, d.month, d.day, 9, 15, tzinfo=IST) + timedelta(minutes=5 * k)
+                c5.append(Candle(t, o, max(o, p) + 2, min(o, p) - 2, p))
+        d += timedelta(days=1)
+    b5 = [Bar(c.ts.replace(tzinfo=None), c.open, c.high, c.low, c.close) for c in c5]
+    b15 = resample(b5, 15)
+    full = make_signals(b15, resample(b5, 30), resample(b5, 60), 30, 60, 15)
+    fa = next(v for k, v in full.items() if k.startswith("A"))
+    hits = checked = 0
+    for i in range(len(b15) - 150, len(b15)):
+        end = b15[i].ts + timedelta(minutes=15)
+        upto = [c for c in c5 if c.ts.replace(tzinfo=None) + timedelta(minutes=5) <= end]
+        dlive, *_ = live_signal(upto, end.replace(tzinfo=IST), "A", 15)
+        assert dlive == fa(i), i
+        checked += 1
+        hits += bool(dlive)
+    assert checked == 150 and hits > 0

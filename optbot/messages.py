@@ -4,7 +4,8 @@ from __future__ import annotations
 from .models import Position
 
 STYLE_NAMES = {"conservative": "Safe", "target_5k": "₹5k target", "swing": "Swing (1-2 days)",
-               "option_buyer": "Option buying", "tradingview": "Your TradingView indicator"}
+               "option_buyer": "Option buying", "tradingview": "Your TradingView indicator",
+               "sniper": "Sniper-style (bot)"}
 
 
 def _style(profile: str) -> str:
@@ -30,8 +31,14 @@ def _single_entry(pos: Position, buy, stop_pct: float, why: str) -> str:
         f"Quantity: {pos.lots} lot{'s' if pos.lots > 1 else ''} = {pos.qty}" + (f" (1 lot = {lot})" if pos.lots > 1 else ""),
         "",
         f"Cost: ₹{pos.entry_debit:.2f} × {pos.qty} = ₹{pos.cost:,.0f} (no extra margin when only buying)",
-        f"Stop: exits if the option falls to ₹{stop_at:.2f} (loss ≈ ₹{pos.cost * stop_pct:,.0f})",
-        "Profit: no cap. A trailing stop follows the price up and locks in more as it rises.",
+        *([f"{pos.index} levels: entry {pos.meta['u_entry']} | SL {pos.meta['u_sl']} | TP1 {pos.meta['u_tp1']} | "
+           f"TP2 {pos.meta['u_tp2']} | TP3 {pos.meta['u_tp3']}",
+           ("Exits fully at TP1." if pos.meta.get("u_exit_mode") == "tp1" else
+            "At TP1 the stop moves to entry, at TP2 to TP1; exits at TP3 or the moved stop."),
+           f"Safety stop: also exits if the option itself falls to ₹{stop_at:.2f}"]
+          if "u_sl" in pos.meta else
+          [f"Stop: exits if the option falls to ₹{stop_at:.2f} (loss ≈ ₹{pos.cost * stop_pct:,.0f})",
+           "Profit: no cap. A trailing stop follows the price up and locks in more as it rises."]),
         f"Most it can ever lose: ₹{pos.cost:,.0f} (what you paid)",
         "",
         f"Why: {why}",

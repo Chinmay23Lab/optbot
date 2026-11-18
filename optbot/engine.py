@@ -375,7 +375,10 @@ class Engine:
                         continue
                     was_carry = p.meta.get("carry")
                     was_trailing = p.trail_active
-                    reason = forced or exit_reason(p, v, now, b.profile, self.market, get_candles(p.index), scfg)
+                    reason = forced
+                    if not reason and "u_sl" in p.meta:
+                        reason = self._underlying_exit(b, p)
+                    reason = reason or exit_reason(p, v, now, b.profile, self.market, get_candles(p.index), scfg)
                     if reason:
                         self._close(b, p, quotes, reason)
                     else:
@@ -419,6 +422,11 @@ class Engine:
                 else:
                     self._note(b.profile.name, "*", "blocked", why)
             ready = [b for b in ready if b.profile.signal_source == "bot"]
+            if not ready:
+                return
+            for b in [b for b in ready if b.profile.entry_signal == "sniper"]:
+                self._sniper_entries(b, now, d, scfg)
+            ready = [b for b in ready if b.profile.entry_signal != "sniper"]
             if not ready:
                 return
 
@@ -500,7 +508,77 @@ class Engine:
                             pos, b.profile.stop_pct, worst_loss_fraction(b.profile),
                             b.profile.max_hold_days if b.profile.hold_overnight else None, sig.reason))
 
-    def _enter_single(self, b: Book, sig, now: datetime, d: date, scfg: dict) -> None:
+    HIST_DAYS = {5: 12, 10: 20, 15: 20, 30: 45, 60: 95}
+
+    def _sniper_entries(self, b: Book, now: datetime, d: date, scfg: dict) -> None:
+        """Sniper-style entries: EMA band cross on the chosen timeframe with the configured confirmations."""
+        from .sniper_rules import live_signal
+        from .strategy import Signal
+        sc = b.profile.sniper or {}
+        rule, tf = str(sc.get("rule", "C")), int(sc.get("tf", 15))
+        sl_atr, tp_step = float(sc.get("sl_atr", 1.0)), float(sc.get("tp_step", 2.0))
+        names = (self.indices if b.profile.trade_indices else []) + (self.stocks if b.profile.trade_stocks else [])
+        cache = self._sniper_cache = getattr(self, "_sniper_cache", {})
+        for name in names:
+            if len(b.account.open) >= b.profile.max_open_positions:
+                return
+            if name in b.traded_indices or any(p.index == name for p in b.account.open):
+                continue
+            if not self.inst.options.get(name) or name not in self.inst.spot_tokens:
+                continue
+            slot = (name, rule, tf, now.replace(second=0, microsecond=0, minute=now.minute - now.minute % 5))
+            if slot not in cache:
+                try:
+                    c5 = self.data.history_candles(name, self.HIST_DAYS.get(tf, 30))
+                    cache[slot] = live_signal(c5, now, rule, tf)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("sniper %s: %s", name, e)
+                    cache[slot] = (0, f"data error: {e}", 0.0, 0.0)
+            direction, why, a, _ = cache[slot]
+            if not direction:
+                if why != "no new bar yet":
+                    self._note(b.profile.name, name, "no-signal", why)
+                continue
+            spot = self.data.index_ltp(name)
+            if not spot or a <= 0:
+                continue
+            risk = sl_atr * a
+            levels = {"u_entry": round(spot, 2), "u_sl": round(spot - direction * risk, 2),
+                      "u_tp1": round(spot + direction * tp_step * risk, 2),
+                      "u_tp2": round(spot + direction * 2 * tp_step * risk, 2),
+                      "u_tp3": round(spot + direction * 3 * tp_step * risk, 2),
+                      "u_exit_mode": sc.get("exit", "run")}
+            sig = Signal(name, "long" if direction == 1 else "short", 0.0, why, None, None)
+            self._enter_single(b, sig, now, d, scfg, levels)
+
+    def _underlying_exit(self, b: Book, p: Position) -> str | None:
+        """Exit on the underlying's SL/TP levels for Sniper-style trades."""
+        m = p.meta
+        spot = self.data.index_ltp(p.index)
+        if not spot:
+            return None
+        up = p.direction == "long"
+        beyond = (lambda lvl: spot >= lvl) if up else (lambda lvl: spot <= lvl)
+        if (spot <= m["u_sl"]) if up else (spot >= m["u_sl"]):
+            return f"{'breakeven stop' if m.get('tp1_hit') else 'stop-loss'} level {m['u_sl']} hit ({p.index} at {spot:.1f})"
+        if not m.get("tp1_hit") and beyond(m["u_tp1"]):
+            if m.get("u_exit_mode") == "tp1":
+                return f"TP1 {m['u_tp1']} hit"
+            m["tp1_hit"] = True
+            m["u_sl"] = m["u_entry"]
+            self.notify.send(f"🎯 {p.index} reached TP1 {m['u_tp1']}. Stop moved to entry {m['u_entry']} "
+                             f"(this trade can no longer lose on the index move). Now aiming for TP2 {m['u_tp2']} / TP3 {m['u_tp3']}.")
+            b.account.save()
+        if m.get("tp1_hit") and not m.get("tp2_hit") and beyond(m["u_tp2"]):
+            m["tp2_hit"] = True
+            m["u_sl"] = m["u_tp1"]
+            self.notify.send(f"🎯 {p.index} reached TP2 {m['u_tp2']}. Stop raised to TP1 {m['u_tp1']}.")
+            b.account.save()
+        if beyond(m["u_tp3"]):
+            return f"TP3 {m['u_tp3']} hit"
+        return None
+
+    def _enter_single(self, b: Book, sig, now: datetime, d: date, scfg: dict, extra: dict | None = None) -> None:
         """Option-buying style: buy one call (up view) or put (down view), index or stock."""
         is_stock = sig.index in self.stocks
         min_dte = b.profile.min_days_to_expiry or scfg["min_days_to_expiry"]
@@ -527,7 +605,7 @@ class Engine:
             return
         meta = {"signal": sig.reason, "strength": round(sig.strength, 2), "or_high": sig.or_high,
                 "or_low": sig.or_low, "spot": spot, "vix": self.vix, "kind": "stock" if is_stock else "index",
-                "trend_ok": True}
+                "trend_ok": True, **(extra or {})}
         pos = self.broker.open_single(b.account, sig.index, sig.direction, c.buy, lots, q, meta)
         if pos:
             b.traded_indices.add(sig.index)

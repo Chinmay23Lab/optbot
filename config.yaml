@@ -159,6 +159,36 @@ profiles:
     max_capital_in_use_pct: 0.80
     min_days_to_expiry: 2        # avoid options in their last day or two, when decay is fastest
 
+  sniper:
+    # The bot finds Sniper-style setups itself (rebuilt from the Sniper Short 2.0 indicator's visible rules,
+    # plus MACD, RSI, Supertrend, VWMA and pivots), on indices and stocks, and buys one option per signal.
+    # Exits on the index/stock price levels: SL, TP1, TP2, TP3. Settings below are set from the 3-year test.
+    capital: 20000
+    style: buy
+    entry_signal: sniper
+    sniper: {rule: C, tf: 15, sl_atr: 1.0, tp_step: 2.0, exit: run}
+    trade_indices: true
+    trade_stocks: true
+    max_lots: 2
+    max_debit_per_lot: 10000
+    max_risk_per_trade: 5000
+    stop_pct: 0.50               # safety stop on the option price; the index SL normally exits first
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 5.0       # option-price trailing effectively off: exits follow the TP levels instead
+    trail_giveback_pct: 0.30
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.80
+    continue_after_target: true
+    daily_loss_cap: 3000
+    max_losing_trades_per_day: 3
+    weekly_loss_cap: 6000
+    account_floor: 12000
+    max_open_positions: 3
+    max_trades_per_day: 6
+    max_capital_in_use_pct: 0.90
+    min_days_to_expiry: 2
+
   tradingview:
     # Trades ONLY the signals you send from your TradingView indicator with /tv (e.g. "/tv NIFTY up"),
     # by buying one option, so the indicator's real results can be measured separately from the bot's.

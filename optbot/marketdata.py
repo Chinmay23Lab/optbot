@@ -185,6 +185,27 @@ class AngelData:
         self._candle_cache[key] = (time.time(), candles)
         return candles
 
+    def history_candles(self, name: str, days: int) -> list[Candle]:
+        """Completed 5-minute candles going back `days` calendar days. Older days are fetched once per
+        session; afterwards only today's candles are refreshed (once per 5-minute slot)."""
+        now = self.clock.now()
+        today = now.date()
+        if not hasattr(self, "_hist"):
+            self._hist = {}
+        key = (name, today)
+        if key not in self._hist or self._hist[key][0] < days:
+            exch, tok = self.inst.spot_tokens[name]
+            start = datetime.combine(today - timedelta(days=days), datetime.min.time(), tzinfo=IST).replace(hour=9, minute=15)
+            end = datetime.combine(today, datetime.min.time(), tzinfo=IST).replace(hour=9, minute=14)
+            old, s = [], start
+            while s < end:
+                e = min(end, s + timedelta(days=60))
+                old += self._candles(exch, tok, "FIVE_MINUTE", s, e)
+                s = e
+            self._hist[key] = (days, sorted({c.ts: c for c in old if c.ts.date() < today}.values(), key=lambda c: c.ts))
+        today_c = [c for c in self.intraday_candles(name, today) if c.ts.date() == today]
+        return self._hist[key][1] + today_c
+
     def daily_candles(self, index: str, n: int) -> list[Candle]:
         exch, tok = self.inst.spot_tokens[index]
         end = self.clock.now()
