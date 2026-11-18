@@ -9,8 +9,10 @@ Exit for all: stop 1.5 ATR, book everything at TP1 (2.0x the stop), same day. Ru
 | 60m D + range breakout (20 bars) | +536 | 134 | 51% | 1.7 | +563 | 289 | 2.3 |
 | 30m D + belt hold | +547 | 105 | 52% | 1.9 | +393 | 160 | 1.2 |
 | 60m G D + confirming candle (current rule) | +366 | 218 | 51% | 1.5 | +374 | 421 | 2.0 |
+| 60m N D + confirming candle AND 20-bar breakout | +357 | 87 | 46% | 1.0 | +792 | 227 | 2.8 |
 | 60m D + swing high / low break | +631 | 206 | 53% | 2.5 | +318 | 380 | 1.6 |
 | 60m D + three-bar reversal | +315 | 111 | 50% | 1.0 | +420 | 218 | 1.4 |
+| 60m M D + (confirming candle OR 20-bar breakout) | +455 | 265 | 53% | 2.0 | +290 | 483 | 1.7 |
 | 60m D + engulfing | +319 | 41 | 49% | 0.7 | +235 | 84 | 0.7 |
 | 60m rising / falling wedge break + trend + all 5 | +272 | 56 | 55% | 0.5 | +218 | 110 | 0.7 |
 | 30m D + channel breakout | +374 | 87 | 49% | 1.0 | +197 | 130 | 0.7 |
@@ -27,7 +29,9 @@ Exit for all: stop 1.5 ATR, book everything at TP1 (2.0x the stop), same day. Ru
 | 30m D + swing high / low break | -21 | 416 | 47% | -0.1 | +219 | 676 | 1.6 |
 | 30m D + three outside up / down | +134 | 87 | 49% | 0.4 | -32 | 186 | -0.2 |
 | 30m marubozu + trend + all 5 | -1 | 305 | 48% | -0.0 | -36 | 599 | -0.3 |
+| 30m N D + confirming candle AND 20-bar breakout | -48 | 168 | 46% | -0.2 | +283 | 338 | 1.5 |
 | 60m D + double bottom / top | -53 | 40 | 50% | -0.1 | +364 | 63 | 0.9 |
+| 30m M D + (confirming candle OR 20-bar breakout) | -53 | 526 | 46% | -0.4 | +49 | 856 | 0.4 |
 | 30m D + engulfing | -29 | 105 | 48% | -0.1 | -58 | 235 | -0.3 |
 | 60m D + inside-bar break | -70 | 147 | 48% | -0.2 | +255 | 225 | 1.1 |
 | 60m strong close + trend + all 5 | -14 | 863 | 49% | -0.1 | -72 | 1699 | -0.9 |

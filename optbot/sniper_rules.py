@@ -222,7 +222,17 @@ def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15, extr
         out["G D + confirming candle (current rule)"] = lambda i: (d if (d := D(i)) and candle(i, d) else 0)
         return out
 
+    def breakout(i):
+        if i < 21:
+            return 0
+        hi, lo = max(x.h for x in b15[i - 20:i]), min(x.l for x in b15[i - 20:i])
+        return 1 if b15[i].c > hi else (-1 if b15[i].c < lo else 0)
+
+    def brk_near(i, d):   # same as patterns.chart_patterns "range breakout (20 bars)", on this bar or the one before
+        return breakout(i) == d or breakout(i - 1) == d
+
     return {
+        "R D + 20-bar range breakout": lambda i: (d if (d := D(i)) and brk_near(i, d) else 0),
         "G D + confirming candle": lambda i: (d if (d := D(i)) and candle(i, d) else 0),
         "H E + confirming candle": lambda i: (d if (d := E(i)) and candle(i, d) else 0),
         "I F + confirming candle": lambda i: (d if (d := F(i)) and candle(i, d) else 0),
