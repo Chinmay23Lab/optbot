@@ -358,3 +358,29 @@ def test_sniper_live_signal_matches_backtest_rules_without_lookahead():
         checked += 1
         hits += bool(dlive)
     assert checked == 150 and hits > 0
+
+
+def test_loss_cap_keeps_bought_options_open_but_blocks_new_trades(tmp_path):
+    """18 Nov: Bharti 2120 PE was force-closed by the account's daily loss cap, then rallied 10.40 -> 14.40."""
+    from optbot.engine import Engine
+    from optbot.instruments import Instruments
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    from optbot.sim import SimMarket, synthetic_rows
+    assert profile("option_buyer").closes_open_on_loss_cap() is False
+    assert profile("conservative").closes_open_on_loss_cap() is True
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    d = date(2026, 11, 18)
+    clock = SimClock(datetime(2026, 11, 18, 10, 30, tzinfo=IST))
+    inst = Instruments(synthetic_rows(cfg["indices"], d), cfg["indices"], cfg["vix"]["names"])
+    eng = Engine(cfg, SimMarket(clock, inst, seed=3), inst, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.start_day(d)
+    eng.cmd_tv("nifty up")
+    tv = next(b for b in eng.books if b.profile.name == "tradingview")
+    assert len(tv.account.open) == 1
+    tv.profile.daily_loss_cap = -1e9      # any P&L now counts as "cap hit"
+    eng.tick()
+    assert len(tv.account.open) == 1, "bought option must keep running to its own stop"
+    assert tv.risk.state.stopped and "daily loss cap" in tv.risk.state.stop_reason

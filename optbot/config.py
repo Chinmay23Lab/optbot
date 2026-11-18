@@ -44,6 +44,14 @@ class Profile:
     signal_source: str = "bot"             # "bot" (own signals) or "tradingview" (signals you send with /tv)
     entry_signal: str = "orb"              # "orb" (opening-range breakout) or "sniper" (rebuilt Sniper rules)
     sniper: dict | None = None             # {rule: A-F, tf: 5/10/15/30/60, sl_atr, tp_step, exit: tp1|run}
+    # When the daily loss cap is hit: always stop new trades. Also close the trades still open?
+    # Default: yes for spreads, no for bought options (each keeps its own stop, and can't lose more than was paid).
+    close_open_on_loss_cap: bool | None = None
+
+    def closes_open_on_loss_cap(self) -> bool:
+        if self.close_open_on_loss_cap is not None:
+            return self.close_open_on_loss_cap
+        return self.style != "buy"
 
     @classmethod
     def from_dict(cls, name: str, d: dict[str, Any]) -> "Profile":

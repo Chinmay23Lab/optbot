@@ -368,6 +368,14 @@ class Engine:
             for b in self.books:
                 realized, _, _ = self.journal.realized(b.profile.name, d, d)
                 forced = b.risk.update_day(realized + self._open_pnl(b, quotes))
+                if forced and forced.startswith("daily loss cap") and not b.profile.closes_open_on_loss_cap():
+                    # No new trades today, but open bought options keep running to their own stop or target.
+                    if not b.risk.state.cap_note_sent and b.account.open:
+                        b.risk.state.cap_note_sent = True
+                        self.notify.send(f"[{b.profile.name}] {forced}: no new trades today. The "
+                                         f"{len(b.account.open)} open trade(s) stay on with their own stop-loss.")
+                    self._note(b.profile.name, "*", "stop-day", forced)
+                    forced = None
                 for p in list(b.account.open):
                     v = liquidation_value(p, quotes)
                     if v is None:

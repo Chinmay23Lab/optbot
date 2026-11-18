@@ -15,6 +15,7 @@ class DayState:
     locked: bool = False          # target reached: lock floor now applies
     stopped: bool = False         # no more entries today
     stop_reason: str = ""
+    cap_note_sent: bool = False   # told the user open trades stay on after the loss cap
 
 
 class RiskManager:
