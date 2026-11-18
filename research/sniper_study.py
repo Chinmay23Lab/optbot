@@ -35,6 +35,8 @@ INDICES = ["NIFTY", "BANKNIFTY", "FINNIFTY", "SENSEX"]
 OPTION_DELTA = 0.5                       # at-the-money option moves about half as much as the underlying
 COST_RS = {"index": 150.0, "stock": 350.0}  # per lot, round trip: brokerage, taxes, bid/ask slippage
 THETA_PER_NIGHT = 0.001                  # an ATM option loses roughly 0.1% of the underlying's price per night held
+# Signal timeframe -> the two higher timeframes that must agree (375 minutes = the whole day).
+TIMEFRAMES = {5: (15, 30), 10: (30, 60), 15: (30, 60), 30: (60, 120), 60: (120, 375)}
 FIRST_ENTRY, LAST_ENTRY, SQUARE_OFF = time(9, 30), time(14, 0), time(15, 10)
 
 
@@ -130,14 +132,14 @@ def atr(bars, n=14):
     return out
 
 
-def htf_dir(bars15: list[Bar], bars_h: list[Bar], minutes: int) -> list[int]:
+def htf_dir(bars15: list[Bar], bars_h: list[Bar], minutes: int, base: int = 15) -> list[int]:
     """For each 15m bar, the EMA5 vs EMA21 direction of the last COMPLETED higher-timeframe bar."""
     c = [b.c for b in bars_h]
     f, s = ema(c, 5), ema(c, 21)
     ends = [b.ts + timedelta(minutes=minutes) for b in bars_h]
     out, j = [], -1
     for b in bars15:
-        done = b.ts + timedelta(minutes=15)
+        done = b.ts + timedelta(minutes=base)
         while j + 1 < len(bars_h) and ends[j + 1] <= done:
             j += 1
         out.append(0 if j < 21 else (1 if f[j] > s[j] else -1))
@@ -200,10 +202,10 @@ def pivots(bars):
 
 
 # ----------------------------------------------------------------------------------------- signals
-def make_signals(b15, b30, b60):
+def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15):
     c = [b.c for b in b15]
     e5, e21, e100, e200 = ema(c, 5), ema(c, 21), ema(c, 100), ema(c, 200)
-    d30, d60 = htf_dir(b15, b30, 30), htf_dir(b15, b60, 60)
+    d30, d60 = htf_dir(b15, b30, h1, base), htf_dir(b15, b60, h2, base)
 
     def cross(i):
         if i < 200:
@@ -238,7 +240,7 @@ def make_signals(b15, b30, b60):
                                                              and d60[i] == d and confirms(i, d) == 5 else 0),
         "A band cross": lambda i: cross(i),
         "B cross + 100/200 trend": lambda i: (d if (d := cross(i)) and trend(i, d) else 0),
-        "C cross + trend + 30m/1h agree": lambda i: (d if (d := cross(i)) and trend(i, d)
+        "C cross + trend + higher timeframes agree": lambda i: (d if (d := cross(i)) and trend(i, d)
                                                      and d30[i] == d and d60[i] == d else 0),
     }
 
@@ -258,13 +260,13 @@ class Trade:
     price: float = 0.0
 
 
-def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int) -> list[Trade]:
+def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int = 15) -> list[Trade]:
     """mode 'tp1': exit everything at TP1. mode 'run': at TP1 move SL to entry, then exit at TP3 or stop."""
     trades, n, i = [], len(b15), 0
     busy_until = -1
     while i < n:
         b = b15[i]
-        done = (b.ts + timedelta(minutes=15)).time()
+        done = (b.ts + timedelta(minutes=base)).time()
         if i <= busy_until or not (FIRST_ENTRY <= done <= LAST_ENTRY):
             i += 1
             continue
@@ -297,7 +299,7 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int) -> list[Tra
             if hit1 and ((x.h >= tp3) if d == 1 else (x.l <= tp3)):
                 exit_px = tp3
                 break
-            if max_days == 1 and (x.ts + timedelta(minutes=15)).time() >= SQUARE_OFF:
+            if max_days == 1 and (x.ts + timedelta(minutes=base)).time() >= SQUARE_OFF:
                 exit_px = x.c
                 break
             m += 1
@@ -338,28 +340,29 @@ def analyze(data: Path, test_days: int = 250) -> str:
         if not p.exists() or lot <= 0:
             continue
         b5 = load_bars(p)
-        b15, b30, b60 = resample(b5, 15), resample(b5, 30), resample(b5, 60)
-        a15 = atr(b15)
-        days = sorted({b.ts.date() for b in b15})
+        days = sorted({b.ts.date() for b in b5})
         if len(days) < test_days + 100:
             continue
         cut = days[-test_days]
-        sigs = make_signals(b15, b30, b60)
-        sigs["Random entries (baseline)"] = random_signals()
-        for sname, fn in sigs.items():
-            for sl, mode, md in variants:
-                tr = backtest(b15, a15, fn, sl, mode, md)
-                train = [t for t in tr if t.day < cut]
-                test = [t for t in tr if t.day >= cut]
-                key = (sname, sl, mode, md)
-                st_tr, st_te = stats(train, lot, COST_RS[kind]), stats(test, lot, COST_RS[kind])
-                rows.append((name, kind, key, st_tr, st_te))
-                cb = combined.setdefault(key, [])
-                cb += [(t, lot, COST_RS[kind]) for t in test]
+        for tf, (h1, h2) in TIMEFRAMES.items():
+            bt = b5 if tf == 5 else resample(b5, tf)
+            at = atr(bt)
+            sigs = make_signals(bt, resample(b5, h1), resample(b5, h2), h1, h2, tf)
+            sigs["Random entries (baseline)"] = random_signals()
+            for sname, fn in sigs.items():
+                for sl, mode, md in variants:
+                    tr = backtest(bt, at, fn, sl, mode, md, tf)
+                    train = [t for t in tr if t.day < cut]
+                    test = [t for t in tr if t.day >= cut]
+                    key = (f"{tf}m {sname}", sl, mode, md)
+                    st_tr, st_te = stats(train, lot, COST_RS[kind]), stats(test, lot, COST_RS[kind])
+                    rows.append((name, kind, key, st_tr, st_te))
+                    cb = combined.setdefault(key, [])
+                    cb += [(t, lot, COST_RS[kind]) for t in test]
     lines = ["# Sniper-style signals: 3-year test", "",
              f"Rebuilt from the visible rules of Sniper Short 2.0 plus the indicators it combines (EMA, MACD, RSI, Supertrend, VWMA, pivots). Test period = last {test_days} trading days, "
              "never used to pick settings. Rupees per lot of an at-the-money option bought, after charges.", ""]
-    lines += ["## All names together, test period (best settings first)", "",
+    lines += ["## All names together, test period: top 30 signal settings, then the best random baselines", "",
               "| Signal | SL (ATR) | Exit | Hold days | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |",
               "|---|---|---|---|---|---|---|---|---|---|"]
     agg = []
@@ -371,20 +374,22 @@ def analyze(data: Path, test_days: int = 250) -> str:
         sd = math.sqrt(sum((x - mean) ** 2 for x in rs) / max(1, len(rs) - 1))
         agg.append((key, len(rs), 100 * sum(t.tp1 for t, _, _ in items) / len(items),
                     100 * sum(x > 0 for x in rs) / len(rs), mean, sum(rs), mean / (sd / math.sqrt(len(rs))) if sd else 0))
-    for key, n, tp1, win, mean, tot, t in sorted(agg, key=lambda r: -r[4]):
+    ranked = sorted([r for r in agg if r[1] >= 30], key=lambda r: -r[4])   # too few trades proves nothing
+    shown = [r for r in ranked if "Random" not in r[0][0]][:30] + [r for r in ranked if "Random" in r[0][0]][:5]
+    for key, n, tp1, win, mean, tot, t in shown:
         s, sl, mode, md = key
         lines.append(f"| {s} | {sl} | {'all at TP1' if mode == 'tp1' else 'TP1 then run to TP3'} | {md} | {n} | "
                      f"{tp1:.0f}% | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} |")
     lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
     for name in lots:
-        best = [r for r in rows if r[0] == name and not r[2][0].startswith("Random")]
+        best = [r for r in rows if r[0] == name and "Random" not in r[2][0] and r[3]["n"] >= 30]
         if not best:
             continue
         r = max(best, key=lambda r: r[3]["rs"])   # chosen on TRAIN, reported on TEST
         te = r[4]
         _, sl, mode, md = r[2]
-        lines.append(f"| {name} | {r[2][0].split()[0]}, SL {sl}, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
+        lines.append(f"| {name} | {' '.join(r[2][0].split()[:2])}, SL {sl}, {mode}, {md}d | {te['n']} | {te['tp1']:.0f}% | {te['win']:.0f}% | "
                      f"{te['rs']:+,.0f} | {te['total']:+,.0f} | {te['t']:.1f} |")
     lines += ["", "t of 2 or more = unlikely to be luck. Random entries with the same SL/TP show what a hit rate "
               "is worth on its own: with TP1 at 2x the stop, about 33% is what chance gives."]
