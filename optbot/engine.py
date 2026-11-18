@@ -240,9 +240,58 @@ class Engine:
         with self.lock:
             return self.report()
 
+    TV_UP = {"up", "buy", "long", "call", "ce", "bull", "bullish"}
+    TV_DOWN = {"down", "sell", "short", "put", "pe", "bear", "bearish"}
+
+    def cmd_tv(self, args: str = "") -> str:
+        """/tv NIFTY up : paper-trade a signal from your TradingView indicator in the 'tradingview' account."""
+        words = args.upper().replace(",", " ").split()
+        direction = next(("long" for w in words if w.lower() in self.TV_UP), None) or \
+            next(("short" for w in words if w.lower() in self.TV_DOWN), None)
+        aliases = {"BANK": "BANKNIFTY", "NIFTYBANK": "BANKNIFTY", "FIN": "FINNIFTY", "NIFTY50": "NIFTY"}
+        name = next((aliases.get(w, w) for w in words if aliases.get(w, w) in [*self.indices, *self.stocks]), None)
+        if not name or not direction:
+            return ("Send it like this: /tv NIFTY up  or  /tv BANKNIFTY down  or  /tv RELIANCE up\n"
+                    f"Names I know: {', '.join(self.indices + self.stocks)}")
+        books = [b for b in self.books if b.profile.signal_source == "tradingview"]
+        if not books or self.inst is None or self.data is None:
+            return "The TradingView practice account is not running right now (market hours only)."
+        with self.lock:
+            now = self.clock.now()
+            d = now.date()
+            if not (self.market.t("first_entry") <= now.time() < self.market.t("last_entry")):
+                return f"Noted, but new trades are only taken between {self.market.t('first_entry'):%H:%M} and {self.market.t('last_entry'):%H:%M}."
+            if not self.inst.options.get(name) or name not in self.inst.spot_tokens:
+                return f"{name}: no option prices available right now."
+            b = books[0]
+            self.journal.decision(now, b.profile.name, name, "tv-signal", direction)
+            quotes = self._quotes_for(b.account.open)
+            for p in list(b.account.open):
+                if p.index == name and p.direction != direction:
+                    self._close(b, p, quotes, "your indicator flipped direction")
+                elif p.index == name:
+                    return f"Already holding {name} in that direction; keeping it."
+            realized, _, losers = self.journal.realized(b.profile.name, d, d)
+            ok, why = b.risk.can_enter(
+                killed=b.account.killed, paused=b.account.paused, equity=b.account.equity(quotes),
+                realized_today=realized, losers_today=losers,
+                week_realized=self.journal.week_realized(b.profile.name, d),
+                open_count=len(b.account.open), trades_today=self.journal.trades_opened(b.profile.name, d),
+                open_pnl=self._open_pnl(b, quotes))
+            if not ok:
+                return f"Signal noted but not traded: {why}."
+            from .strategy import Signal
+            sig = Signal(name, direction, 0.0, "your TradingView indicator (sent with /tv)", None, None)
+            before = len(b.account.open)
+            b.traded_indices.discard(name)
+            self._enter_single(b, sig, now, d, self.cfg["strategy"])
+            if len(b.account.open) > before:
+                return "Paper trade placed (details above)."
+            return f"Signal noted but not traded: {self._last_reason.get((b.profile.name, name), 'see report')[4:]}"
+
     def command_handlers(self) -> dict:
         return {"/status": self.cmd_status, "/pause": self.cmd_pause, "/resume": self.cmd_resume,
-                "/kill": self.cmd_kill, "/report": self.cmd_report}
+                "/kill": self.cmd_kill, "/report": self.cmd_report, "/tv": self.cmd_tv}
 
     # ------------------------------------------------------------------ option-chain history
     def snapshot_chains(self) -> None:
@@ -369,6 +418,7 @@ class Engine:
                     ready.append(b)
                 else:
                     self._note(b.profile.name, "*", "blocked", why)
+            ready = [b for b in ready if b.profile.signal_source == "bot"]
             if not ready:
                 return
 

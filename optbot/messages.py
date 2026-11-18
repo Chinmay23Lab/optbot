@@ -4,7 +4,7 @@ from __future__ import annotations
 from .models import Position
 
 STYLE_NAMES = {"conservative": "Safe", "target_5k": "₹5k target", "swing": "Swing (1-2 days)",
-               "option_buyer": "Option buying"}
+               "option_buyer": "Option buying", "tradingview": "Your TradingView indicator"}
 
 
 def _style(profile: str) -> str:

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import inspect
 import time
 from pathlib import Path
 from typing import Callable
@@ -52,10 +53,20 @@ class TelegramNotifier(Notifier):
                         msg = upd.get("message") or {}
                         if str((msg.get("chat") or {}).get("id")) != self.chat_id:
                             continue  # ignore anyone else
-                        cmd = (msg.get("text") or "").strip().split()[0].lower() if msg.get("text") else ""
-                        cmd = cmd.split("@")[0]
+                        if time.time() - float(msg.get("date") or 0) > 300:
+                            continue  # sent while the bot was offline: too old to act on
+                        parts = (msg.get("text") or "").strip().split(maxsplit=1)
+                        if not parts:
+                            continue
+                        cmd = parts[0].lower().split("@")[0]
+                        rest = parts[1] if len(parts) > 1 else ""
                         fn = handlers.get(cmd)
-                        self.send(fn() if fn else "Commands: " + " ".join(sorted(handlers)))
+                        if not fn:
+                            self.send("Commands: " + " ".join(sorted(handlers)))
+                        elif len(inspect.signature(fn).parameters):
+                            self.send(fn(rest))
+                        else:
+                            self.send(fn())
                 except Exception as e:  # noqa: BLE001
                     log.warning("telegram poll failed: %s", e)
                     time.sleep(5)

@@ -305,3 +305,27 @@ def test_single_option_round_trip_and_exits(tmp_path):
     assert pos.realized_pnl() > 0 and "SELL NIFTY" in exit_message(pos, "test")
     too_dear, why = choose_single([c], {"T1": Quote("T1", 200, 199.5, 200.5)}, prof, 5.0, 1)
     assert too_dear is None and "above" in why
+
+
+def test_tv_command_paper_trades_your_signal(tmp_path):
+    from optbot.engine import Engine
+    from optbot.instruments import Instruments
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    from optbot.sim import SimMarket, synthetic_rows
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    d = date(2026, 11, 18)
+    clock = SimClock(datetime(2026, 11, 18, 10, 30, tzinfo=IST))
+    inst = Instruments(synthetic_rows(cfg["indices"], d), cfg["indices"], cfg["vix"]["names"])
+    eng = Engine(cfg, SimMarket(clock, inst, seed=3), inst, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.start_day(d)
+    assert "Send it like this" in eng.cmd_tv("hello")
+    out = eng.cmd_tv("nifty up")
+    tv = next(b for b in eng.books if b.profile.name == "tradingview")
+    assert len(tv.account.open) == 1, out
+    assert tv.account.open[0].legs[0].contract.right == "CE"
+    eng.cmd_tv("NIFTY down")   # flip: closes the call, buys a put
+    assert [p.legs[0].contract.right for p in tv.account.open] == ["PE"]
+    assert all(not b.account.open for b in eng.books if b.profile.name != "tradingview")
