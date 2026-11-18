@@ -137,6 +137,8 @@ profiles:
     # Simple, no margin, unlimited upside, but time decay works against it every minute it is held.
     capital: 20000
     style: buy
+    # 19 Nov: rule G = rule D plus a confirming candle (engulfing, hammer/shooting star, strong close or inside-bar
+    # break) on the signal bar: +₹366/trade last year (n=218), +₹374 the 2 years before (n=421). Previously:
     # Sniper-style rule D on the 1-hour chart (band cross + MACD, RSI, Supertrend, VWMA, pivot all agree), full exit at
     # TP1. The only tested setting that made money in BOTH the last year (+₹185/trade, n=390) and the 2 years before
     # (+₹147/trade, n=641). Weak (t≈1), so this is a live paper test, not a proven edge. Rule E (15m) was dropped on
