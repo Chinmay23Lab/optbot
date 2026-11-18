@@ -121,6 +121,34 @@ def pivots(bars):
 
 
 # ----------------------------------------------------------------------------------------- signals
+def candle_patterns(bars) -> dict[str, list[int]]:
+    """Classic candlestick patterns per bar: +1 bullish, -1 bearish, 0 none. Uses bar i and earlier only."""
+    n = len(bars)
+    out = {k: [0] * n for k in ("engulfing", "pin bar", "strong close", "inside-bar break")}
+    for i in range(2, n):
+        b, p, q = bars[i], bars[i - 1], bars[i - 2]
+        rng = b.h - b.l
+        if rng <= 0:
+            continue
+        body = abs(b.c - b.o)
+        up, lo = b.h - max(b.o, b.c), min(b.o, b.c) - b.l
+        if b.c > b.o and p.c < p.o and b.c >= p.o and b.o <= p.c and body > abs(p.c - p.o):
+            out["engulfing"][i] = 1
+        elif b.c < b.o and p.c > p.o and b.c <= p.o and b.o >= p.c and body > abs(p.c - p.o):
+            out["engulfing"][i] = -1
+        if lo >= 2 * body and lo >= 0.6 * rng and up <= 0.25 * rng:
+            out["pin bar"][i] = 1           # hammer
+        elif up >= 2 * body and up >= 0.6 * rng and lo <= 0.25 * rng:
+            out["pin bar"][i] = -1          # shooting star
+        if body >= 0.6 * rng and b.c - b.l >= 0.75 * rng and b.c > b.o:
+            out["strong close"][i] = 1
+        elif body >= 0.6 * rng and b.h - b.c >= 0.75 * rng and b.c < b.o:
+            out["strong close"][i] = -1
+        if p.h <= q.h and p.l >= q.l:       # previous bar was an inside bar
+            out["inside-bar break"][i] = 1 if b.c > p.h else (-1 if b.c < p.l else 0)
+    return out
+
+
 def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15):
     c = [b.c for b in b15]
     e5, e21, e100, e200 = ema(c, 5), ema(c, 21), ema(c, 100), ema(c, 200)
@@ -152,7 +180,30 @@ def make_signals(b15, b30, b60, h1: int = 30, h2: int = 60, base: int = 15):
                   piv[i] is not None and (c[i] - piv[i]) * d > 0]
         return sum(checks)
 
+    pat = candle_patterns(b15)
+
+    def candle(i, d, kinds=("engulfing", "pin bar", "strong close", "inside-bar break")):
+        return any(pat[k][i] == d for k in kinds)
+
+    D = lambda i: (d if (d := cross(i)) and confirms(i, d) == 5 else 0)  # noqa: E731
+    E = lambda i: (d if (d := cross(i)) and trend(i, d) and confirms(i, d) >= 4 else 0)  # noqa: E731
+    F = lambda i: (d if (d := cross(i)) and trend(i, d) and d30[i] == d and d60[i] == d and confirms(i, d) == 5 else 0)  # noqa: E731
+
+    def pattern_entry(i, kinds, need):
+        if i < 200:
+            return 0
+        for d in (1, -1):
+            if candle(i, d, kinds) and trend(i, d) and confirms(i, d) >= need:
+                return d
+        return 0
+
     return {
+        "G D + confirming candle": lambda i: (d if (d := D(i)) and candle(i, d) else 0),
+        "H E + confirming candle": lambda i: (d if (d := E(i)) and candle(i, d) else 0),
+        "I F + confirming candle": lambda i: (d if (d := F(i)) and candle(i, d) else 0),
+        "J any candle pattern + trend + all 5": lambda i: pattern_entry(i, tuple(pat), 5),
+        "K engulfing + trend + all 5": lambda i: pattern_entry(i, ("engulfing",), 5),
+        "L pin bar (hammer/shooting star) + trend + 4 of 5": lambda i: pattern_entry(i, ("pin bar",), 4),
         "D cross + all 5 (MACD, RSI, Supertrend, VWMA, pivot)": lambda i: (d if (d := cross(i)) and confirms(i, d) == 5 else 0),
         "E cross + trend + 4 of 5 confirmations": lambda i: (d if (d := cross(i)) and trend(i, d) and confirms(i, d) >= 4 else 0),
         "F everything: C + all 5 confirmations": lambda i: (d if (d := cross(i)) and trend(i, d) and d30[i] == d

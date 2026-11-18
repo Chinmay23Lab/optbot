@@ -262,6 +262,22 @@ def analyze(data: Path, test_days: int = 250) -> str:
         s, sl, mode, md, tp = key
         lines.append(f"| {s} | {sl} | {EXIT_NAMES[mode]} | {md} | {n} | {win:.0f}% | {mean:+,.0f} | {tot:+,.0f} | {t:.1f} | "
                      f"{train_summary(combined_train.get(key, []))} |")
+    def mean_n(items):
+        rs = [rupees(t, lot, cost) for t, lot, cost in items]
+        return (sum(rs) / len(rs), len(rs)) if rs else (0.0, 0)
+
+    robust = []
+    for key, n, tp1, win, mean, tot, t in agg:
+        tm, tn = mean_n(combined_train.get(key, []))
+        if n >= 30 and tn >= 30 and "Random" not in key[0]:
+            robust.append((min(mean, tm), key, n, win, mean, t, tm, tn))
+    robust.sort(key=lambda r: -r[0])
+    lines += ["", "## Most consistent: ranked by the WORSE of the two periods (every signal, incl. candle patterns)", "",
+              "| Signal | SL (ATR) | TP step | Exit | Hold days | Win % | Last year ₹/trade (n, t) | Older 2 years ₹/trade (n) |",
+              "|---|---|---|---|---|---|---|---|"]
+    for worst, key, n, win, mean, t, tm, tn in robust[:20]:
+        s, sl, mode, md, tp = key
+        lines.append(f"| {s} | {sl} | {tp} | {EXIT_NAMES[mode]} | {md} | {win:.0f}% | {mean:+,.0f} ({n}, {t:.1f}) | {tm:+,.0f} ({tn}) |")
     lines += ["", "## Per name: best signal and settings picked on older data, results on the unseen year", "",
               "| Name | Settings | Trades | TP1 before SL | Win % | ₹/trade | Total ₹ | t |", "|---|---|---|---|---|---|---|---|"]
     for name in lots:
