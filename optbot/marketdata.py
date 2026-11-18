@@ -62,7 +62,7 @@ class AngelData:
         self.inst = instruments
         self.clock = clock
         self.quote_rl = RateLimiter(1.0)
-        self.candle_rl = RateLimiter(1.0)
+        self.candle_rl = RateLimiter(0.4)   # Angel blocked us at 1/s once stocks were added (18 Nov)
         self._candle_cache: dict[tuple, tuple[float, list[Candle]]] = {}
         self.record_dir = record_dir
         if record_dir:
