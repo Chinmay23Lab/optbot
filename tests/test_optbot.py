@@ -456,3 +456,21 @@ def test_scalper_exits_on_option_price_and_time():
     assert ex(None, pos, 105, now) is None
     assert ex(None, pos, 105, now.replace(minute=15)).startswith("time stop")
     assert profile("scalper").entry_signal == "scalper"
+
+
+def test_tip_tracker_entry_targets_and_closing_stop():
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
+    from tips_tracker import evaluate
+    t0 = datetime(2026, 11, 19, 13, 10, tzinfo=IST)
+    from datetime import timedelta as td
+    mk = lambda k, o, h, l, c, day=0: (t0 + td(days=day, minutes=5 * k), o, h, l, c)  # noqa: E731
+    tip = {"above": 60, "sl": 45, "sl_close": True, "targets": [75, 90]}
+    # dips below SL intraday but closes above it: closing-basis stop must NOT trigger
+    r = evaluate(tip, [mk(0, 58, 61, 57, 60), mk(1, 60, 62, 44, 50), mk(2, 50, 76, 50, 74)])
+    assert r["entry"] == 60 and r["exit"] is None and r["hits"] == [0]
+    r = evaluate(tip, [mk(0, 58, 61, 57, 60), mk(1, 60, 60, 40, 44)])
+    assert r["status"].startswith("stop-loss") and r["exit"] == 44
+    r = evaluate(tip, [mk(0, 58, 61, 57, 60), mk(1, 60, 91, 59, 88)])
+    assert r["status"] == "all targets hit" and r["exit"] == 90
+    assert evaluate(tip, [mk(0, 50, 55, 49, 52)])["entry"] is None
