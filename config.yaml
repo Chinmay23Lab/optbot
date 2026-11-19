@@ -146,9 +146,9 @@ profiles:
     entry_signal: sniper
     sniper: {rule: G, tf: 60, sl_atr: 1.5, tp_step: 2.0, exit: tp1}
     trade_indices: true
-    trade_stocks: true
+    trade_stocks: false          # 19 Nov: Nifty 50 test, rule G on stocks: -₹146/-₹156 per trade; the profit is in the indices
     max_lots: 2
-    max_debit_per_lot: 8000      # most premium paid for 1 lot
+    max_debit_per_lot: 12000     # most premium paid for 1 lot (one NIFTY lot is ~₹9-10k)
     max_risk_per_trade: 5000
     stop_pct: 0.50               # safety stop on the option price; the stock/index SL normally exits first
     exit_mode: trail
@@ -182,9 +182,9 @@ profiles:
     # Runs side by side with option_buyer (rule G, candle confirmation) as a live comparison.
     sniper: {rule: R, tf: 60, sl_atr: 1.5, tp_step: 2.0, exit: tp1}
     trade_indices: true
-    trade_stocks: true
+    trade_stocks: false          # 19 Nov: Nifty 50 test, rule R on stocks: -₹58/-₹11 per trade; the profit is in the indices
     max_lots: 2
-    max_debit_per_lot: 10000
+    max_debit_per_lot: 12000
     max_risk_per_trade: 5000
     stop_pct: 0.50               # safety stop on the option price; the index SL normally exits first
     exit_mode: trail
@@ -210,9 +210,12 @@ profiles:
     capital: 20000
     style: buy
     entry_signal: scalper
-    scalper: {tf: 15, trigger: pb, tp_pct: 0.20, sl_pct: 0.10, time_min: 15, budget: 10000}
+    # 19 Nov backtest (research/scalper_study.py, 3 years): every one of 108 settings lost, about -₹70 to -₹95 per trade
+    # (roughly the charges). Least bad: indices, 15m pullback-break, +15% / -15%, 10 min. Runs on paper only to
+    # measure it live, as Chinmay asked; not expected to make money.
+    scalper: {tf: 15, trigger: pb, tp_pct: 0.15, sl_pct: 0.15, time_min: 10, budget: 10000}
     trade_indices: true
-    trade_stocks: true
+    trade_stocks: false
     max_lots: 10
     max_debit_per_lot: 15000
     max_risk_per_trade: 5000
