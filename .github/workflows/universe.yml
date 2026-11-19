@@ -45,9 +45,12 @@ jobs:
         run: python research/universe_study.py --data universe_data --report universe_report.md && cat universe_report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Test the scalper (5/15-minute entries, % of premium exits)
         run: python research/scalper_study.py --data universe_data --report scalper_report.md && cat scalper_report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Test positional stock-option trades on the daily chart
+        run: python research/stock_swing_study.py --data universe_data --report stock_swing_report.md | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: universe-study
           path: |
             universe_report.md
             scalper_report.md
+            stock_swing_report.md
