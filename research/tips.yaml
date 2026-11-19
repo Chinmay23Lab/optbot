@@ -1,0 +1,6 @@
+# Tip-channel calls Chinmay forwarded, tracked honestly (paper only). Times are when they reached us (IST).
+# sl_close: true = stop on a closing basis ("CLBS"). lots: as the channel advised.
+- {name: SUNPHARMA, strike: 1900, right: CE, expiry_month: DEC, above: 60, sl: 45, sl_close: true, targets: [75, 90], lots: 2, given: "2026-11-19 12:46"}
+- {name: RVNL, strike: 200, right: CE, expiry_month: DEC, above: 7.20, sl: 3, sl_close: true, targets: [9.50, 12], lots: 2, given: "2026-11-19 13:06"}
+- {name: SRF, strike: 2400, right: CE, expiry_month: DEC, above: 102, sl: null, sl_close: false, targets: [], lots: 2, given: "2026-11-19 13:06"}
+- {name: BANDHANBNK, strike: 180, right: CE, expiry_month: DEC, above: 7.50, sl: 5.50, sl_close: false, targets: [9.50, 11.50], lots: 2, given: "2026-11-19 13:06"}

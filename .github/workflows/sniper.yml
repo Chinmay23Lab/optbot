@@ -45,9 +45,12 @@ jobs:
         run: python research/sniper_study.py analyze --data sniper_data --report sniper_report.md && cat sniper_report.md >> "$GITHUB_STEP_SUMMARY"
       - name: Test every candlestick and chart pattern
         run: python research/pattern_study.py --data sniper_data --report pattern_report.md && cat pattern_report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Test the friend's two strategies (NIFTY, BANKNIFTY)
+        run: python research/friend_study.py --data sniper_data --report friend_report.md && cat friend_report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: sniper-study
           path: |
             sniper_report.md
             pattern_report.md
+            friend_report.md
