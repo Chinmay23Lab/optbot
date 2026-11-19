@@ -1,0 +1,50 @@
+name: trade review
+
+# Shows how far each of a day's paper trades ran after the bot entered. Read-only, no orders.
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "day to review (YYYY-MM-DD), default today"
+        default: ""
+
+concurrency:
+  group: optbot-review
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      OPTBOT_QUIET: "1"
+      TZ: Asia/Kolkata
+      DAY: ${{ github.event.inputs.day }}
+    steps:
+      - name: Refuse during market hours
+        run: |
+          now=$(date +%H%M); dow=$(date +%u)
+          if [ "$dow" -le 5 ] && [ "$now" -ge 0830 ] && [ "$now" -le 1535 ]; then
+            echo "Market hours: not logging in while the paper-trading session runs."; exit 1; fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Restore bot state (for the Telegram chat id only; not saved back)
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: optbot-state-none
+          restore-keys: optbot-state-
+      - name: Check the calls
+        run: python research/trade_review.py --day "${DAY:-$(date +%F)}"
