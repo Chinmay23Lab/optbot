@@ -40,10 +40,14 @@ jobs:
           cache: pip
       - run: pip install -q -r requirements.txt
       - name: Download price history (Nifty 50 stocks)
-        run: python research/sniper_study.py fetch --out universe_data --years "${YEARS:-3}" --extra research/nifty50.txt --stocks-only
+        run: python research/sniper_study.py fetch --out universe_data --years "${YEARS:-3}" --extra research/nifty50.txt
       - name: Test rules G and R on every stock
         run: python research/universe_study.py --data universe_data --report universe_report.md && cat universe_report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Test the scalper (5/15-minute entries, % of premium exits)
+        run: python research/scalper_study.py --data universe_data --report scalper_report.md && cat scalper_report.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
           name: universe-study
-          path: universe_report.md
+          path: |
+            universe_report.md
+            scalper_report.md
