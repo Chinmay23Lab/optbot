@@ -474,3 +474,28 @@ def test_tip_tracker_entry_targets_and_closing_stop():
     r = evaluate(tip, [mk(0, 58, 61, 57, 60), mk(1, 60, 91, 59, 88)])
     assert r["status"] == "all targets hit" and r["exit"] == 90
     assert evaluate(tip, [mk(0, 50, 55, 49, 52)])["entry"] is None
+
+
+def test_profit_lock_does_not_sell_bought_winners(tmp_path):
+    """19 Nov: Kotak 495CE was sold at 6.30 by the day profit lock; it closed the day at 8.55."""
+    from optbot.engine import Engine
+    from optbot.instruments import Instruments
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    from optbot.sim import SimMarket, synthetic_rows
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    d = date(2026, 11, 18)
+    clock = SimClock(datetime(2026, 11, 18, 10, 30, tzinfo=IST))
+    inst = Instruments(synthetic_rows(cfg["indices"], d), cfg["indices"], cfg["vix"]["names"])
+    eng = Engine(cfg, SimMarket(clock, inst, seed=3), inst, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.start_day(d)
+    eng.cmd_tv("nifty up")
+    tv = next(b for b in eng.books if b.profile.name == "tradingview")
+    assert len(tv.account.open) == 1
+    tv.profile.daily_profit_target = -1e9      # target "reached" and the lock floor is above any P&L
+    tv.risk.state.peak_pnl = 1e9
+    eng.tick()
+    assert len(tv.account.open) == 1, "bought winner must keep running on its own stop"
+    assert tv.risk.state.stopped and "profit lock" in tv.risk.state.stop_reason

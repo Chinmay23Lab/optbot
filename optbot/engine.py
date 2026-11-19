@@ -376,6 +376,15 @@ class Engine:
                                          f"{len(b.account.open)} open trade(s) stay on with their own stop-loss.")
                     self._note(b.profile.name, "*", "stop-day", forced)
                     forced = None
+                if forced and forced.startswith("profit lock") and b.profile.style == "buy":
+                    # "Lock your losses, not your profits" (Chinmay, 19 Nov): no new trades, but winners keep
+                    # running on their own stop / trailing stop instead of being sold on a dip.
+                    if not b.risk.state.cap_note_sent and b.account.open:
+                        b.risk.state.cap_note_sent = True
+                        self.notify.send(f"[{b.profile.name}] {forced}: no new trades today. Open winners keep "
+                                         f"running on their own stop-loss.")
+                    self._note(b.profile.name, "*", "stop-day", forced)
+                    forced = None
                 for p in list(b.account.open):
                     v = liquidation_value(p, quotes)
                     if v is None:
