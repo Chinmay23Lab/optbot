@@ -52,7 +52,8 @@ def main() -> int:
                 if vals:
                     hi = max(vals, key=lambda v: v[1])
                     print(line + f" | spread best after entry {hi[1]:.2f} at {hi[0]:%H:%M} (₹{(hi[1] - ed) * qty:+,.0f}), "
-                                 f"day close {vals[-1][1]:.2f} (₹{(vals[-1][1] - ed) * qty:+,.0f})")
+                                 f"day close {vals[-1][1]:.2f} (₹{(vals[-1][1] - ed) * qty:+,.0f}); bought leg alone: "
+                                 f"{cs[0].open:.2f} at entry, high {max(c.high for c in cs):.2f}")
                 continue
             if not cs:
                 print(line + " | no candles")
