@@ -156,7 +156,7 @@ profiles:
     trail_trigger_pct: 5.0       # option-price trailing off: exits follow the TP levels instead
     trail_giveback_pct: 0.30
     daily_profit_target: 5000
-    daily_profit_lock_pct: 0.80
+    daily_profit_lock_pct: 0.60  # 19 Nov: 0.80 closed Kotak 495CE at 6.30; it closed the day at 8.55
     continue_after_target: true
     daily_loss_cap: 2500
     max_losing_trades_per_day: 2
@@ -192,7 +192,7 @@ profiles:
     trail_trigger_pct: 5.0       # option-price trailing effectively off: exits follow the TP levels instead
     trail_giveback_pct: 0.30
     daily_profit_target: 5000
-    daily_profit_lock_pct: 0.80
+    daily_profit_lock_pct: 0.60  # 19 Nov: 0.80 closed Kotak 495CE at 6.30; it closed the day at 8.55
     continue_after_target: true
     daily_loss_cap: 3000
     max_losing_trades_per_day: 3
