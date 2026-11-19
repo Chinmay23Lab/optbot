@@ -20,6 +20,48 @@ EXITS = [(1.5, "tp1", 1, 2.0, "all at TP1, same day (live now)"),
          (1.5, "half", 3, 2.0, "half at TP1, trail rest, up to 3 days")]
 
 
+def htf_entry(b5, sig60, bt60, kind):
+    """1-hour signal sets the direction for the rest of that day; enter on the next 15-minute trigger that agrees.
+    kind 'ema': 15m EMA5/21 cross; kind 'pb': 15m pullback-and-break; kind 'D': 15m rule D. One entry per 1-hour signal."""
+    from datetime import timedelta
+    bt15 = ss.resample(b5, 15)
+    if kind == "ema":
+        c = [x.c for x in bt15]
+        f, sl_ = ss.ema(c, 5), ss.ema(c, 21)
+        trig = [0] + [1 if f[i - 1] <= sl_[i - 1] and f[i] > sl_[i] else -1 if f[i - 1] >= sl_[i - 1] and f[i] < sl_[i]
+                      else 0 for i in range(1, len(c))]
+        tr_fn = lambda i: trig[i]  # noqa: E731
+    elif kind == "pb":   # pullback then break: one bar against the trend, next bar closes beyond its high/low
+        b = bt15
+        tr_fn = lambda i: (1 if b[i - 1].c < b[i - 2].c and b[i].c > b[i - 1].h else  # noqa: E731
+                           -1 if b[i - 1].c > b[i - 2].c and b[i].c < b[i - 1].l else 0) if i >= 2 else 0
+    else:
+        h1, h2 = ss.TIMEFRAMES[15]
+        sg = ss.make_signals(bt15, ss.resample(b5, h1), ss.resample(b5, h2), h1, h2, 15)
+        tr_fn = next(f for k, f in sg.items() if k.startswith("D "))
+    # direction per 15m bar: last 1-hour signal that closed by this bar's start, same day
+    ends = [(x.ts + timedelta(minutes=60), j) for j, x in enumerate(bt60)]
+    dirs, j, cur, cur_id = [], 0, 0, -1
+    for x in bt15:
+        while j < len(ends) and ends[j][0] <= x.ts:
+            d = sig60(ends[j][1])
+            if d:
+                cur, cur_id = d, ends[j][1]
+            j += 1
+        if j and bt60[ends[j - 1][1]].ts.date() != x.ts.date():
+            cur = 0
+        dirs.append((cur, cur_id))
+    used = set()
+
+    def fn(i):
+        d, sid = dirs[i]
+        if not d or sid in used or i < 50 or tr_fn(i) != d:
+            return 0
+        used.add(sid)
+        return d
+    return bt15, fn
+
+
 def summ(rs):
     if len(rs) < 2:
         return "-"
@@ -60,6 +102,16 @@ def analyze(data: Path, test_days=250) -> str:
                 pooled[k][0].extend(te)
                 pooled[k][1].extend(trn)
                 per.setdefault((name, rule, label), (te, trn))
+            for kind_ in ("ema", "pb", "D"):
+                b15, f15 = htf_entry(b5, fn, bt, kind_)
+                a15 = ss.atr(b15)
+                tr = ss.backtest(b15, a15, f15, 1.5, "tp1", 1, 15, 2.0)
+                cost = ss.COST_RS[kind]
+                label = f"1h direction + 15m { {'ema': 'EMA5/21 cross', 'pb': 'pullback-break', 'D': 'rule D'}[kind_] } entry, all at TP1"
+                k = (rule, label)
+                pooled.setdefault(k, ([], []))
+                pooled[k][0].extend(ss.rupees(t, lot, cost) for t in tr if t.day >= cut)
+                pooled[k][1].extend(ss.rupees(t, lot, cost) for t in tr if t.day < cut)
     out = ["# Rules G and R on the wide stock list, 1-hour chart", "",
            "Rupees per trade per lot of an at-the-money stock option bought, after charges and overnight decay.", "",
            "## All stocks pooled", "", "| Rule | Exit | Last year | 2 years before |", "|---|---|---|---|"]
