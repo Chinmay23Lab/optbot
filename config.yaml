@@ -209,6 +209,44 @@ profiles:
     max_capital_in_use_pct: 0.90
     min_days_to_expiry: 2
 
+  stocks:
+    # 19 Nov: stock options only, kept apart from the index accounts. Rule R on the 10 big stocks made
+    # +₹102/trade last year and +₹217 the 2 years before (other Nifty 50 names lost), so only these 10.
+    # The bot finds Sniper-style setups itself (rebuilt from the Sniper Short 2.0 indicator's visible rules,
+    # plus MACD, RSI, Supertrend, VWMA and pivots), on indices and stocks, and buys one option per signal.
+    # Exits on the index/stock price levels: SL, TP1, TP2, TP3. Settings below are set from the 3-year test.
+    capital: 20000
+    style: buy
+    entry_signal: sniper
+    # 3-year test (18 Nov): best on the last year = 15-min chart, all checks (rule F), SL 1.5 ATR, TP every 1.3x SL,
+    # stop to entry at TP1: +₹529/trade (n=136), but −₹161/trade (n=327) over the 2 years before. Kept as the closest
+    # copy of Chinmay's indicator, to measure it live; not a proven edge.
+    # 19 Nov: switched to rule R = 1-hour rule D + a 20-bar range breakout, the most consistent of 34 candle/chart
+    # patterns tested (research/pattern-results-2026-11-18.md): +₹536/trade (n=134) last year, +₹563 (n=289) before.
+    # Runs side by side with option_buyer (rule G, candle confirmation) as a live comparison.
+    sniper: {rule: R, tf: 60, sl_atr: 1.5, tp_step: 2.0, exit: tp1}
+    trade_indices: false
+    trade_stocks: true
+    max_lots: 2
+    max_debit_per_lot: 12000
+    max_risk_per_trade: 5000
+    stop_pct: 0.50               # safety stop on the option price; the index SL normally exits first
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 5.0       # option-price trailing effectively off: exits follow the TP levels instead
+    trail_giveback_pct: 0.30
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.60  # 19 Nov: 0.80 closed Kotak 495CE at 6.30; it closed the day at 8.55
+    continue_after_target: true
+    daily_loss_cap: 3000
+    max_losing_trades_per_day: 3
+    weekly_loss_cap: 6000
+    account_floor: 12000
+    max_open_positions: 3
+    max_trades_per_day: 6
+    max_capital_in_use_pct: 0.90
+    min_days_to_expiry: 2
+
   scalper:
     # Chinmay, 19 Nov: quick buy-only trades of about ₹10k, booked at a fixed % gain on the option within minutes,
     # up to 5 a day. Entry: a 5/15-minute trigger in the direction of the 1-hour trend. Exits on the option price:
