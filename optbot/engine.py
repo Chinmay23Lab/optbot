@@ -386,6 +386,8 @@ class Engine:
                     reason = forced
                     if not reason and "u_sl" in p.meta:
                         reason = self._underlying_exit(b, p)
+                    if not reason and "o_tp" in p.meta:
+                        reason = self._premium_exit(p, v, now)
                     reason = reason or exit_reason(p, v, now, b.profile, self.market, get_candles(p.index), scfg)
                     if reason:
                         self._close(b, p, quotes, reason)
@@ -434,7 +436,9 @@ class Engine:
                 return
             for b in [b for b in ready if b.profile.entry_signal == "sniper"]:
                 self._sniper_entries(b, now, d, scfg)
-            ready = [b for b in ready if b.profile.entry_signal != "sniper"]
+            for b in [b for b in ready if b.profile.entry_signal == "scalper"]:
+                self._scalper_entries(b, now, d, scfg)
+            ready = [b for b in ready if b.profile.entry_signal not in ("sniper", "scalper")]
             if not ready:
                 return
 
@@ -569,6 +573,59 @@ class Engine:
             sig = Signal(name, "long" if direction == 1 else "short", 0.0, why, None, None)
             self._enter_single(b, sig, now, d, scfg, levels)
 
+    def _scalper_entries(self, b: Book, now: datetime, d: date, scfg: dict) -> None:
+        """Scalper: 5/15-minute trigger in the 1-hour trend's direction. Several trades a day, one per name at a time."""
+        from .sniper_rules import scalper_signal
+        from .strategy import Signal
+        sc = b.profile.scalper or {}
+        tf, trig = int(sc.get("tf", 15)), str(sc.get("trigger", "pb"))
+        mins = (now.hour * 60 + now.minute) - (9 * 60 + 15)
+        if mins < tf or mins % tf >= 5:   # only in the 5 minutes after an entry-chart bar closes
+            return
+        names = (self.indices if b.profile.trade_indices else []) + (self.stocks if b.profile.trade_stocks else [])
+        cache = self._scalp_cache = getattr(self, "_scalp_cache", {})
+        bar_end = now.replace(second=0, microsecond=0) - timedelta(minutes=mins % tf)
+        for name in names:
+            if len(b.account.open) >= b.profile.max_open_positions:
+                return
+            if any(p.index == name for p in b.account.open):
+                continue
+            if not self.inst.options.get(name) or name not in self.inst.spot_tokens:
+                continue
+            slot = (name, tf, trig, bar_end)
+            if slot not in cache:
+                try:
+                    res = scalper_signal(self.data.history_candles(name, 12), now, tf, trig)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("scalper %s: %s", name, e)
+                    continue
+                if res[1] == "no new bar yet" or res[1].startswith("need "):
+                    self._note(b.profile.name, name, "no-signal", res[1])
+                    continue
+                cache[slot] = res
+            direction, why = cache[slot]
+            if not direction:
+                self._note(b.profile.name, name, "no-signal", why)
+                continue
+            if cache.get(("done",) + slot):
+                continue
+            cache[("done",) + slot] = True   # one entry per name per bar
+            sig = Signal(name, "long" if direction == 1 else "short", 0.0, why, None, None)
+            self._enter_single(b, sig, now, d, scfg, {
+                "scalp": True, "tp_pct": float(sc.get("tp_pct", 0.20)), "sl_pct": float(sc.get("sl_pct", 0.10)),
+                "time_min": int(sc.get("time_min", 15)), "budget": float(sc.get("budget", 10000))})
+
+    def _premium_exit(self, p: Position, v: float, now: datetime) -> str | None:
+        """Scalper exits on the option's own price: target %, stop %, or time stop."""
+        m = p.meta
+        if v >= m["o_tp"]:
+            return f"target +{m['tp_pct']:.0%} on the option ({p.entry_debit:.2f} → {v:.2f})"
+        if v <= m["o_sl"]:
+            return f"stop -{m['sl_pct']:.0%} on the option ({p.entry_debit:.2f} → {v:.2f})"
+        if now >= datetime.fromisoformat(m["t_exit"]):
+            return f"time stop: {m['time_min']} minutes up ({p.entry_debit:.2f} → {v:.2f})"
+        return None
+
     def _underlying_exit(self, b: Book, p: Position) -> str | None:
         """Exit on the underlying's SL/TP levels for Sniper-style trades."""
         m = p.meta
@@ -618,6 +675,8 @@ class Engine:
             return
         lots = b.risk.size(c.cost_per_lot, c.cost_per_lot * worst_loss_fraction(b.profile), b.account.cash,
                            b.account.capital_in_use())
+        if extra and extra.get("budget") and lots >= 1:   # scalper: about one fixed amount per trade
+            lots = max(1, min(lots, int(extra["budget"] // c.cost_per_lot)))
         if lots < 1:
             self._note(b.profile.name, sig.index, "skip", f"size 0 (1 lot costs ₹{c.cost_per_lot:.0f})")
             return
@@ -625,6 +684,11 @@ class Engine:
                 "or_low": sig.or_low, "spot": spot, "vix": self.vix, "kind": "stock" if is_stock else "index",
                 "trend_ok": True, **(extra or {})}
         pos = self.broker.open_single(b.account, sig.index, sig.direction, c.buy, lots, q, meta)
+        if pos and meta.get("scalp"):
+            pos.meta["o_tp"] = round(pos.entry_debit * (1 + meta["tp_pct"]), 2)
+            pos.meta["o_sl"] = round(pos.entry_debit * (1 - meta["sl_pct"]), 2)
+            pos.meta["t_exit"] = (now + timedelta(minutes=meta["time_min"])).isoformat()
+            b.account.save()
         if pos:
             b.traded_indices.add(sig.index)
             self.journal.trade(pos)

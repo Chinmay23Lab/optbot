@@ -203,6 +203,36 @@ profiles:
     max_capital_in_use_pct: 0.90
     min_days_to_expiry: 2
 
+  scalper:
+    # Chinmay, 19 Nov: quick buy-only trades of about ₹10k, booked at a fixed % gain on the option within minutes,
+    # up to 5 a day. Entry: a 5/15-minute trigger in the direction of the 1-hour trend. Exits on the option price:
+    # +tp_pct target, -sl_pct stop, or a time stop. Settings from research/scalper_study.py (see the comment below).
+    capital: 20000
+    style: buy
+    entry_signal: scalper
+    scalper: {tf: 15, trigger: pb, tp_pct: 0.20, sl_pct: 0.10, time_min: 15, budget: 10000}
+    trade_indices: true
+    trade_stocks: true
+    max_lots: 10
+    max_debit_per_lot: 15000
+    max_risk_per_trade: 5000
+    stop_pct: 0.30               # safety only; the scalper's own -sl_pct stop normally exits first
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 5.0       # option-price trailing off: the scalper's own exits apply
+    trail_giveback_pct: 0.30
+    daily_profit_target: 6000
+    daily_profit_lock_pct: 0.80
+    continue_after_target: false # stop for the day at +₹6k
+    daily_loss_cap: 3000
+    max_losing_trades_per_day: 2 # stop after 2 losers
+    weekly_loss_cap: 8000
+    account_floor: 12000
+    max_open_positions: 1
+    max_trades_per_day: 5
+    max_capital_in_use_pct: 0.75
+    min_days_to_expiry: 1
+
   tradingview:
     # Trades ONLY the signals you send from your TradingView indicator with /tv (e.g. "/tv NIFTY up"),
     # by buying one option, so the indicator's real results can be measured separately from the bot's.

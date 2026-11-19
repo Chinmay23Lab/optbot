@@ -282,3 +282,40 @@ def live_signal(candles5, now: datetime, rule: str, tf: int) -> tuple[int, str, 
     if not d:
         return 0, f"no {tf}m signal ({name})", a, bt[i].c
     return d, f"{tf}m {name}", a, bt[i].c
+
+
+def scalper_signal(candles5, now: datetime, tf: int, trigger: str) -> tuple[int, str]:
+    """Scalper entry (same rules as research/scalper_study.py): the latest completed `tf`-minute bar gives a trigger
+    in the direction of the 1-hour trend. Trend = 1-hour EMA9 above EMA21 with the close above EMA21 (or both below).
+    trigger 'ema': EMA5/21 cross on the entry chart; 'pb': one bar against the trend, then a close beyond its high/low.
+    """
+    b5 = [Bar(c.ts.replace(tzinfo=None), c.open, c.high, c.low, c.close) for c in candles5]
+    naive_now = now.replace(tzinfo=None)
+    bt = b5 if tf == 5 else resample(b5, tf)
+    while bt and bt[-1].ts + timedelta(minutes=tf) > naive_now:
+        bt.pop()
+    if len(bt) < 30:
+        return 0, f"need 30 {tf}-minute bars, have {len(bt)}"
+    i = len(bt) - 1
+    done = bt[i].ts + timedelta(minutes=tf)
+    if naive_now - done > timedelta(minutes=5):
+        return 0, "no new bar yet"
+    b60 = [x for x in resample(b5, 60) if x.ts + timedelta(minutes=60) <= done]
+    if len(b60) < 30:
+        return 0, f"need 30 hourly bars, have {len(b60)}"
+    c60 = [x.c for x in b60]
+    e9, e21 = ema(c60, 9)[-1], ema(c60, 21)[-1]
+    trend = 1 if e9 > e21 and c60[-1] > e21 else -1 if e9 < e21 and c60[-1] < e21 else 0
+    if not trend:
+        return 0, "1-hour trend unclear"
+    if trigger == "ema":
+        c = [x.c for x in bt]
+        f, s = ema(c, 5), ema(c, 21)
+        t = 1 if f[-2] <= s[-2] and f[-1] > s[-1] else -1 if f[-2] >= s[-2] and f[-1] < s[-1] else 0
+    else:
+        t = (1 if bt[i - 1].c < bt[i - 2].c and bt[i].c > bt[i - 1].h else
+             -1 if bt[i - 1].c > bt[i - 2].c and bt[i].c < bt[i - 1].l else 0)
+    if t != trend:
+        return 0, f"no {tf}m trigger with the 1-hour trend ({'up' if trend == 1 else 'down'})"
+    kind = "EMA5/21 cross" if trigger == "ema" else "pullback-break"
+    return trend, f"scalp: 1-hour trend {'up' if trend == 1 else 'down'} + {tf}m {kind}"

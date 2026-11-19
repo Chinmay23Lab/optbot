@@ -405,3 +405,54 @@ def test_patterns_use_no_future_bars():
             assert pc[k][cut] == full_c[k][cut], k
         for k in pch:
             assert pch[k][cut] == full_ch[k][cut], k
+
+
+def test_scalper_signal_matches_study_and_uses_no_future_bars():
+    import random as _r
+    import sys
+    from datetime import timedelta
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
+    import scalper_study as scs
+    from optbot.sniper_rules import Bar, resample, scalper_signal
+    rnd = _r.Random(7)
+    p, c5, d = 1500.0, [], date(2026, 9, 1)
+    while len(c5) < 75 * 25:
+        if d.weekday() < 5:
+            for k in range(75):
+                o = p
+                p *= 1 + rnd.gauss(0.0001, 0.002)
+                t = datetime(d.year, d.month, d.day, 9, 15, tzinfo=IST) + timedelta(minutes=5 * k)
+                c5.append(Candle(t, o, max(o, p) + 0.5, min(o, p) - 0.5, p))
+        d += timedelta(days=1)
+    b5 = [Bar(c.ts.replace(tzinfo=None), c.open, c.high, c.low, c.close) for c in c5]
+    b15 = resample(b5, 15)
+    trig = scs.triggers(b15, "pb")
+    tr = scs.trend_1h(b5)
+    hits = 0
+    for i in range(len(b15) - 120, len(b15)):
+        end = b15[i].ts + timedelta(minutes=15)
+        trend = 0
+        for t_end, v in tr:
+            if t_end <= end:
+                trend = v
+        want = trend if trend and trig[i] == trend else 0
+        upto = [c for c in c5 if c.ts.replace(tzinfo=None) + timedelta(minutes=5) <= end]
+        got, why = scalper_signal(upto, end.replace(tzinfo=IST), 15, "pb")
+        assert got == want, (i, why)
+        hits += bool(got)
+    assert hits > 0
+
+
+def test_scalper_exits_on_option_price_and_time():
+    from types import SimpleNamespace
+    from optbot.engine import Engine
+    now = datetime(2026, 11, 20, 10, 0, tzinfo=IST)
+    meta = {"o_tp": 120.0, "o_sl": 90.0, "tp_pct": 0.2, "sl_pct": 0.1, "time_min": 15,
+            "t_exit": datetime(2026, 11, 20, 10, 15, tzinfo=IST).isoformat()}
+    pos = SimpleNamespace(meta=meta, entry_debit=100.0)
+    ex = Engine._premium_exit
+    assert ex(None, pos, 121, now).startswith("target")
+    assert ex(None, pos, 89, now).startswith("stop")
+    assert ex(None, pos, 105, now) is None
+    assert ex(None, pos, 105, now.replace(minute=15)).startswith("time stop")
+    assert profile("scalper").entry_signal == "scalper"
