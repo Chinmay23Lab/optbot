@@ -41,7 +41,7 @@ FIRST_ENTRY, LAST_ENTRY, SQUARE_OFF = time(9, 30), time(14, 0), time(15, 10)
 
 
 # ----------------------------------------------------------------------------------------- fetch
-def fetch(out: Path, years: int) -> None:
+def fetch(out: Path, years: int, extra: Path | None = None, stocks_only: bool = False) -> None:
     from optbot.clock import IST, Clock
     from optbot.config import load_config
     from optbot.instruments import Instruments, download_scrip_master
@@ -49,6 +49,9 @@ def fetch(out: Path, years: int) -> None:
 
     cfg = load_config(ROOT / "config.yaml")
     stocks = (cfg.get("stocks") or {}).get("names") or []
+    if extra:
+        words = [w for ln in extra.read_text().splitlines() if not ln.startswith("#") for w in ln.split()]
+        stocks = list(dict.fromkeys([*stocks, *words]))
     out.mkdir(parents=True, exist_ok=True)
     sm = out / "instruments.json"
     download_scrip_master(sm)
@@ -58,7 +61,7 @@ def fetch(out: Path, years: int) -> None:
     try:
         end = datetime.now(IST)
         start = end - timedelta(days=365 * years)
-        for name in INDICES + stocks:
+        for name in ([] if stocks_only else INDICES) + stocks:
             if name not in inst.spot_tokens:
                 print(f"{name}: no price token, skipped")
                 continue
@@ -313,12 +316,14 @@ def main() -> int:
     f = sub.add_parser("fetch")
     f.add_argument("--out", default="sniper_data")
     f.add_argument("--years", type=int, default=3)
+    f.add_argument("--extra", default=None, help="file with more stock names to fetch")
+    f.add_argument("--stocks-only", action="store_true")
     a = sub.add_parser("analyze")
     a.add_argument("--data", default="sniper_data")
     a.add_argument("--report", default="sniper_report.md")
     args = ap.parse_args()
     if args.cmd == "fetch":
-        fetch(Path(args.out), args.years)
+        fetch(Path(args.out), args.years, Path(args.extra) if args.extra else None, args.stocks_only)
     else:
         rep = analyze(Path(args.data))
         Path(args.report).write_text(rep)

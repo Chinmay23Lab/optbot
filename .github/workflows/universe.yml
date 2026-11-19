@@ -1,0 +1,49 @@
+name: stock universe study
+
+# Read-only research: rebuilds the visible rules of the Sniper Short 2.0 indicator and tests them on
+# years of 5-minute history for the indices and the stock list. Start it only outside market hours.
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "years of history"
+        default: "3"
+
+concurrency:
+  group: optbot-research
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TZ: Asia/Kolkata
+      YEARS: ${{ github.event.inputs.years }}
+    steps:
+      - name: Refuse during market hours
+        run: |
+          now=$(date +%H%M); dow=$(date +%u)
+          if [ "$dow" -le 5 ] && [ "$now" -ge 0830 ] && [ "$now" -le 1535 ]; then
+            echo "Market hours: not logging in while the paper-trading session runs."; exit 1; fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Download price history (Nifty 50 stocks)
+        run: python research/sniper_study.py fetch --out universe_data --years "${YEARS:-3}" --extra research/nifty50.txt --stocks-only
+      - name: Test rules G and R on every stock
+        run: python research/universe_study.py --data universe_data --report universe_report.md && cat universe_report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: universe-study
+          path: universe_report.md
