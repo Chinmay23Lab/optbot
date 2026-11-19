@@ -94,6 +94,8 @@ class AngelData:
                     self.login()
                     continue
                 log.warning("SmartAPI %s: %s", getattr(fn, "__name__", fn), msg)
+                if "too many" in str(msg).lower():
+                    time.sleep(3 + 3 * attempt)   # rate limited: back off instead of retrying at once
             except Exception as e:  # noqa: BLE001
                 rate = "access rate" in str(e)
                 if not rate or attempt:
@@ -173,14 +175,17 @@ class AngelData:
         now = self.clock.now()
         key = ("5m", index, day, now.replace(second=0, microsecond=0).minute // 5)
         cached = self._candle_cache.get(key)
-        if cached:
-            return cached[1]
+        if cached and (cached[1] or time.time() - cached[0] < 30):
+            return cached[1]   # a failed fetch is retried after 30 s, not on every tick
         exch, tok = self.inst.spot_tokens[index]
         # A few sessions back, so EMAs are warmed up at the open; the strategy picks out today's.
         start = datetime.combine(day - timedelta(days=5), datetime.min.time(), tzinfo=IST).replace(hour=9, minute=15)
         candles = self._candles(exch, tok, "FIVE_MINUTE", start, now)
         # keep completed candles only
         candles = [c for c in candles if c.ts + timedelta(minutes=5) <= now]
+        if not candles:
+            self._candle_cache[key] = (time.time(), [])
+            return []
         self._candle_cache = {k: v for k, v in self._candle_cache.items() if k[1] != index or k[0] != "5m"}
         self._candle_cache[key] = (time.time(), candles)
         return candles

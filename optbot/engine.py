@@ -534,14 +534,24 @@ class Engine:
                 continue
             if not self.inst.options.get(name) or name not in self.inst.spot_tokens:
                 continue
+            # A tf-minute bar closes at 9:15 + k*tf. Only fetch candles in the 10 minutes after a close: that is
+            # the only time a fresh signal can appear, and it keeps us well inside Angel One's rate limits.
+            mins = (now.hour * 60 + now.minute) - (9 * 60 + 15)
+            if mins < tf or mins % tf >= 10:
+                continue
             slot = (name, rule, tf, now.replace(second=0, microsecond=0, minute=now.minute - now.minute % 5))
             if slot not in cache:
                 try:
                     c5 = self.data.history_candles(name, self.HIST_DAYS.get(tf, 30))
-                    cache[slot] = live_signal(c5, now, rule, tf)
+                    res = live_signal(c5, now, rule, tf)
                 except Exception as e:  # noqa: BLE001
                     log.warning("sniper %s: %s", name, e)
-                    cache[slot] = (0, f"data error: {e}", 0.0, 0.0)
+                    res = (0, f"data error: {e}", 0.0, 0.0)
+                if res[1].startswith(("data error", "no new bar yet", "need ", "not enough")):
+                    # missing data: don't remember it, try again on the next tick
+                    self._note(b.profile.name, name, "no-signal", res[1])
+                    continue
+                cache[slot] = res
             direction, why, a, _ = cache[slot]
             if not direction:
                 if why != "no new bar yet":
