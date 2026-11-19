@@ -63,13 +63,15 @@ strategy:
 # so the daily report compares them directly.
 profiles:
   conservative:
+    # 19 Nov: Chinmay asked for buying only, no selling: bought calls/puts instead of spreads.
+    style: buy
     capital: 20000
     max_lots: 1
-    max_debit_per_lot: 3000      # max premium paid per spread lot (also its max loss)
-    max_risk_per_trade: 1000
-    stop_pct: 0.40               # stop when spread loses 40% of what was paid
-    exit_mode: target            # take profit at a target, trail after that
-    target_pct_of_max_profit: 0.60
+    max_debit_per_lot: 12000     # max premium paid per lot
+    max_risk_per_trade: 4000
+    stop_pct: 0.30               # stop when the option loses 30% of what was paid
+    exit_mode: trail
+    target_pct_of_max_profit: null
     trail_trigger_pct: 0.30      # once up 30% on the debit, start trailing
     trail_giveback_pct: 0.35     # trailing stop gives back 35% of the peak gain
     daily_profit_target: 1000    # no new entries after this
@@ -83,11 +85,13 @@ profiles:
 
   target_5k:
     # Chinmay's goal: aim for ₹5k+/day, let winners run on a trailing stop, no fixed profit cap.
+    # 19 Nov: Chinmay asked for buying only, no selling: bought calls/puts instead of spreads.
+    style: buy
     capital: 20000
     max_lots: 10                 # lots are limited by capital and the risk cap below
-    max_debit_per_lot: 4000
-    max_risk_per_trade: 2000
-    stop_pct: 0.40
+    max_debit_per_lot: 12000
+    max_risk_per_trade: 4000
+    stop_pct: 0.30
     exit_mode: trail             # winners exit only on the trailing stop (or time)
     target_pct_of_max_profit: null
     trail_trigger_pct: 0.20
@@ -107,10 +111,12 @@ profiles:
     # Holds 1-2 days when the daily trend and the day's breakout strongly agree. Overnight only while
     # the trade is in profit and the trend still agrees; closed at the latest on the 2nd day after entry.
     # Gap risk: the market can open sharply against an overnight hold. The spread caps the worst case.
+    # 19 Nov: Chinmay asked for buying only, no selling: bought calls/puts instead of spreads.
+    style: buy
     capital: 20000
     max_lots: 2
-    max_debit_per_lot: 2000
-    max_risk_per_trade: 2000     # sized so that even losing the whole spread overnight costs at most this
+    max_debit_per_lot: 12000
+    max_risk_per_trade: 12000    # a bought option held overnight can lose all of what was paid
     stop_pct: 0.40
     exit_mode: trail
     target_pct_of_max_profit: null

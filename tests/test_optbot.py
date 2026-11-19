@@ -84,7 +84,7 @@ def test_risk_daily_cap_and_profit_lock():
 
 
 def test_risk_target_5k_keeps_trading_after_target():
-    rm = RiskManager(profile("target_5k"))
+    rm = RiskManager(profile("target_5k", max_risk_per_trade=2000, max_debit_per_lot=4000))
     rm.new_day(date(2026, 11, 17))
     assert rm.update_day(5200) is None and not rm.state.stopped
     assert rm.update_day(6000) is None
@@ -92,7 +92,7 @@ def test_risk_target_5k_keeps_trading_after_target():
 
 
 def test_sizing_respects_risk_and_cash():
-    rm = RiskManager(profile("target_5k"))
+    rm = RiskManager(profile("target_5k", max_risk_per_trade=2000, max_debit_per_lot=4000))
     assert rm.size(cost_per_lot=2500, risk_per_lot=1000, cash=20000, capital_in_use=0) == 2  # ₹2,000 risk cap
     assert rm.size(cost_per_lot=2500, risk_per_lot=1000, cash=3000, capital_in_use=0) == 1
     assert rm.size(cost_per_lot=5000, risk_per_lot=2000, cash=20000, capital_in_use=0) == 0  # over per-lot cap
@@ -124,7 +124,7 @@ def test_target_profile_books_target_but_trail_profile_does_not():
     mkt = MarketCalendar(CFG["market"])
     t = datetime(2026, 11, 17, 11, 0, tzinfo=IST)
     v = 40 + 0.6 * 60 + 1  # beyond 60% of max profit
-    assert exit_reason(_pos(), v, t, profile("conservative"), mkt, [], CFG["strategy"]) == "profit target"
+    assert exit_reason(_pos(), v, t, profile("conservative", style="spread", exit_mode="target", target_pct_of_max_profit=0.60), mkt, [], CFG["strategy"]) == "profit target"
     assert exit_reason(_pos(), v, t, profile("target_5k"), mkt, [], CFG["strategy"]) is None
 
 
@@ -368,7 +368,7 @@ def test_loss_cap_keeps_bought_options_open_but_blocks_new_trades(tmp_path):
     from optbot.notify import Notifier
     from optbot.sim import SimMarket, synthetic_rows
     assert profile("option_buyer").closes_open_on_loss_cap() is False
-    assert profile("conservative").closes_open_on_loss_cap() is True
+    assert profile("conservative", style="spread").closes_open_on_loss_cap() is True
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(dict(CFG)))
     cfg = load_config(p)
