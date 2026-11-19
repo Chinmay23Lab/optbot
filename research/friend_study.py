@@ -113,9 +113,15 @@ def analyze(data: Path, test_days=250) -> str:
         k, lot, kind = line.split(",")
         lots[k] = (int(lot), kind)
     # (sl_atr, mode, tp_step): as written = SL 1.5 ATR, TP 1.5 ATR -> tp_step 1.0; plus 2x target; plus reverse-only
-    variants = [(1.5, "tp1", 1.0, "as written: SL 1.5 ATR, target 1.5 ATR"),
-                (1.5, "tp1", 2.0, "SL 1.5 ATR, target 3 ATR"),
-                (1.5, "flip", 2.0, "SL 1.5 ATR, hold till opposite signal")]
+    variants = [(1.5, "tp1", 1.0, 1, "as written: SL 1.5 ATR, target 1.5 ATR"),
+                (1.5, "tp1", 2.0, 1, "SL 1.5 ATR, target 3 ATR"),
+                (1.5, "flip", 2.0, 1, "SL 1.5 ATR, hold till opposite signal")]
+    # swing (Chinmay, 19 Nov: "works on 1 hour chart ... swing trades for indices"): hold over nights
+    swing = [(1.5, "tp1", 1.0, 5, "SWING up to 5 days: SL 1.5 ATR, target 1.5 ATR"),
+             (1.5, "tp1", 2.0, 5, "SWING up to 5 days: SL 1.5 ATR, target 3 ATR"),
+             (1.5, "run", 2.0, 5, "SWING up to 5 days: SL to cost at 3 ATR, exit at 9 ATR"),
+             (1.5, "flip", 2.0, 5, "SWING: hold till stop or opposite signal (max 5 days)"),
+             (2.5, "flip", 2.0, 5, "SWING: wide SL 2.5 ATR, hold till opposite signal (max 5 days)")]
     test, train = {}, {}
     for name in NAMES:
         if name not in lots:
@@ -128,13 +134,13 @@ def analyze(data: Path, test_days=250) -> str:
             bt = b5 if tf == 5 else ss.resample(b5, tf)
             at = ss.atr(bt)
             for sname, fn in signals(bt).items():
-                for sl, mode, tp, label in variants:
-                    tr = ss.backtest(bt, at, fn, sl, mode, 1, tf, tp)
+                for sl, mode, tp, md, label in variants + (swing if tf in (30, 60) else []):
+                    tr = ss.backtest(bt, at, fn, sl, mode, md, tf, tp)
                     key = (sname, f"{tf}m", label)
                     test.setdefault(key, []).extend((t, lot, ss.COST_RS[kind]) for t in tr if t.day >= cut)
                     train.setdefault(key, []).extend((t, lot, ss.COST_RS[kind]) for t in tr if t.day < cut)
     lines = ["# Friend's two strategies on NIFTY + BANKNIFTY, 3 years", "",
-             "Rupees per trade per lot of an at-the-money option bought, after charges. Same-day exits.", "",
+             "Rupees per trade per lot of an at-the-money option bought, after charges (and option decay for nights held). Same-day exits unless marked SWING.", "",
              "| Strategy | Chart | Exit | Last year | 2 years before |", "|---|---|---|---|---|"]
     for key in test:
         lines.append(f"| {key[0]} | {key[1]} | {key[2]} | {summ(test[key])} | {summ(train.get(key, []))} |")
