@@ -63,6 +63,8 @@ class AngelData:
         self.clock = clock
         self.quote_rl = RateLimiter(1.0)
         self.candle_rl = RateLimiter(0.4)   # Angel blocked us at 1/s once stocks were added (18 Nov)
+        self.any_rl = RateLimiter(0.9)      # one gate for every call: quote + candle bursts together still tripped the limit (19 Nov)
+        self._ltp_cache: dict[tuple, tuple[float, float | None]] = {}
         self._candle_cache: dict[tuple, tuple[float, list[Candle]]] = {}
         self.record_dir = record_dir
         if record_dir:
@@ -85,6 +87,7 @@ class AngelData:
 
     def _call(self, fn, *args):
         for attempt in range(3):
+            self.any_rl.wait()
             try:
                 resp = fn(*args)
                 if resp and resp.get("status"):
@@ -100,7 +103,7 @@ class AngelData:
                 rate = "access rate" in str(e)
                 if not rate or attempt:
                     log.warning("SmartAPI error (%s), attempt %d", e, attempt + 1)
-                time.sleep((3 + 3 * attempt) if rate else (1 + attempt))  # back off harder on rate limits
+                time.sleep((5 + 5 * attempt) if rate else (1 + attempt))  # back off harder on rate limits
         return None
 
     # --- quotes --------------------------------------------------------------
@@ -114,17 +117,26 @@ class AngelData:
                     out.extend(data.get("fetched", []))
         return out
 
+    def _ltp(self, exch: str, tok: str) -> float | None:
+        # several profiles ask for the same index price in one tick: answer from a 10 s cache
+        hit = self._ltp_cache.get((exch, tok))
+        if hit and time.time() - hit[0] < 10:
+            return hit[1]
+        rows = self._market("LTP", {exch: [tok]})
+        val = float(rows[0]["ltp"]) if rows else None
+        if val is not None:
+            self._ltp_cache[(exch, tok)] = (time.time(), val)
+        return val
+
     def index_ltp(self, index: str) -> float | None:
         exch, tok = self.inst.spot_tokens[index]
-        rows = self._market("LTP", {exch: [tok]})
-        return float(rows[0]["ltp"]) if rows else None
+        return self._ltp(exch, tok)
 
     def vix(self) -> float | None:
         if not self.inst.vix_token:
             return None
         exch, tok = self.inst.vix_token
-        rows = self._market("LTP", {exch: [tok]})
-        return float(rows[0]["ltp"]) if rows else None
+        return self._ltp(exch, tok)
 
     def quotes(self, contracts: list[Contract]) -> dict[str, Quote]:
         by_exch: dict[str, list[str]] = {}
