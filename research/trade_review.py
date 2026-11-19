@@ -41,11 +41,19 @@ def main() -> int:
             seg = next((s for s in ("NFO", "BFO") if (s, buy) in tok), None)
             line = f"{prof} | {idx} {dirn} {buy}{' / sell ' + sell if sell else ''} x{qty} | in {et_dt:%H:%M} at {ed:.2f}"
             line += f" | out {datetime.fromisoformat(xt):%H:%M} at {xv:.2f} ({why}) P&L ₹{pnl:+,.0f}" if xt else " | still open"
-            if sell or not seg:
-                print(line + " | (spread or contract not found: option high not checked)")
+            if not seg or (sell and (seg, sell) not in tok):
+                print(line + " | contract not found")
                 continue
             end = et_dt.replace(hour=15, minute=30)
             cs = [c for c in data._candles(seg, tok[(seg, buy)], "FIVE_MINUTE", et_dt, end) if c.ts >= et_dt]
+            if sell:   # spread value = bought leg minus sold leg, on 5-minute closes
+                sc = {c.ts: c.close for c in data._candles(seg, tok[(seg, sell)], "FIVE_MINUTE", et_dt, end)}
+                vals = [(c.ts, c.close - sc[c.ts]) for c in cs if c.ts in sc]
+                if vals:
+                    hi = max(vals, key=lambda v: v[1])
+                    print(line + f" | spread best after entry {hi[1]:.2f} at {hi[0]:%H:%M} (₹{(hi[1] - ed) * qty:+,.0f}), "
+                                 f"day close {vals[-1][1]:.2f} (₹{(vals[-1][1] - ed) * qty:+,.0f})")
+                continue
             if not cs:
                 print(line + " | no candles")
                 continue
