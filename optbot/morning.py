@@ -13,7 +13,10 @@ log = logging.getLogger(__name__)
 
 MARKETS = [("S&P 500", "^GSPC"), ("Nasdaq", "^IXIC"), ("Nikkei", "^N225"), ("Kospi", "^KS11"),
            ("Hang Seng", "^HSI"), ("Crude", "CL=F"), ("USD/INR", "INR=X")]
-FEEDS = ["https://www.moneycontrol.com/rss/marketreports.xml", "https://www.moneycontrol.com/rss/latestnews.xml"]
+FEEDS = [("Moneycontrol", "https://www.moneycontrol.com/rss/marketreports.xml"),
+         ("Moneycontrol", "https://www.moneycontrol.com/rss/buzzingstocks.xml"),
+         ("Moneycontrol", "https://www.moneycontrol.com/rss/latestnews.xml"),
+         ("Economic Times", "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms")]
 UA = {"User-Agent": "Mozilla/5.0 (optbot morning note)"}
 
 
@@ -39,33 +42,39 @@ def markets_line() -> str:
         try:
             ch = _change(sym)
         except Exception as e:  # noqa: BLE001
-            log.info("morning: %s failed: %s", sym, e)
+            log.warning("morning: %s failed: %s", sym, e)
             continue
         if ch is not None:
             parts.append(f"{name} {ch:+.1f}%")
     return ", ".join(parts)
 
 
-def headlines(n: int = 5) -> list[str]:
+def headlines(n: int = 5) -> tuple[str, list[str]]:
     import requests
     out: list[str] = []
-    for url in FEEDS:
+    source = ""
+    for src, url in FEEDS:
+        if out and src != source:
+            break
         try:
             r = requests.get(url, headers=UA, timeout=10)
             r.raise_for_status()
-            if b"<!ENTITY" in r.content or b"<!DOCTYPE" in r.content:
-                raise ValueError("feed with a DTD refused")
-            root = ET.fromstring(r.content)
+            body = r.content
+            if b"<!ENTITY" in body:
+                raise ValueError("feed with entities refused")
+            body = re.sub(rb"<!DOCTYPE[^>]*>", b"", body)
+            root = ET.fromstring(body)
         except Exception as e:  # noqa: BLE001
-            log.info("morning: feed %s failed: %s", url, e)
+            log.warning("morning: feed %s failed: %s", url, e)
             continue
+        source = src
         for item in root.iter("item"):
             t = re.sub(r"\s+", " ", (item.findtext("title") or "")).strip()
             if t and t not in out:
                 out.append(t)
             if len(out) >= n:
-                return out
-    return out
+                return source, out
+    return source, out
 
 
 def morning_note() -> str:
@@ -73,8 +82,8 @@ def morning_note() -> str:
     m = markets_line()
     if m:
         lines.append("Global: " + m)
-    h = headlines()
+    src, h = headlines()
     if h:
-        lines.append("Moneycontrol:")
+        lines.append(f"{src}:")
         lines += [f"• {x}" for x in h]
     return "\n".join(lines)
