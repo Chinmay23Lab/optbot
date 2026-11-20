@@ -303,10 +303,10 @@ profiles:
     daily_profit_target: 5000
     daily_profit_lock_pct: 0.60
     continue_after_target: true
-    daily_loss_cap: 3000
-    max_losing_trades_per_day: 3
-    weekly_loss_cap: 6000
-    account_floor: 12000
+    daily_loss_cap: 2000         # 20 Nov: Chinmay wants losses kept small
+    max_losing_trades_per_day: 2
+    weekly_loss_cap: 4000
+    account_floor: 15000
     max_open_positions: 2
     max_trades_per_day: 8
     max_capital_in_use_pct: 0.95
