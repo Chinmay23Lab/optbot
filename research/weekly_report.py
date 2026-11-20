@@ -31,6 +31,7 @@ def _symbol(t: dict) -> str:
 def build(db: sqlite3.Connection, state_dir: Path, profiles: list[tuple[str, float]], monday: date,
           friday: date) -> str:
     lines = [f"Weekly paper report, {monday:%d %b} to {friday:%d %b %Y}"]
+    ranking: list[tuple[float, str]] = []
     tot_cap = tot_now = tot_week = 0.0
     for prof, capital in profiles:
         st_path = state_dir / f"{prof}.json"
@@ -60,6 +61,7 @@ def build(db: sqlite3.Connection, state_dir: Path, profiles: list[tuple[str, flo
         week = sum(t["pnl"] or 0 for t in closed)
         wins = [t for t in closed if (t["pnl"] or 0) > 0]
         losses = [t for t in closed if (t["pnl"] or 0) <= 0]
+        ranking.append((now - capital, f"{_name(prof)} ₹{capital:,.0f} → ₹{now:,.0f}"))
         tot_cap += capital
         tot_now += now
         tot_week += week
@@ -78,8 +80,10 @@ def build(db: sqlite3.Connection, state_dir: Path, profiles: list[tuple[str, flo
             lines.extend(open_lines)
         else:
             lines.append("  No trades open.")
-    lines.append(f"\nAll accounts: started with ₹{tot_cap:,.0f}, now ₹{tot_now:,.0f} (₹{tot_now - tot_cap:+,.0f}). "
-                 f"Closed this week: ₹{tot_week:+,.0f}. Paper money only.")
+    ranking.sort(reverse=True)
+    lines.insert(1, "Best to worst on ₹20,000 each: " + "; ".join(r for _, r in ranking))
+    lines.append("\nEach style is a separate test with its own pretend ₹20,000 (your real capital is one ₹20,000). "
+                 "Paper money only.")
     return "\n".join(lines)
 
 

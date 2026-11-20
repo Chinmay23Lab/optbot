@@ -534,3 +534,4 @@ def test_weekly_report(tmp_path):
     assert "₹+1,800 from 1 closed trade(s), 1 profit, 0 loss" in text
     assert "BANKNIFTY25NOV62400CE" in text and "₹+1,500 so far" in text
     assert "OLD" not in text
+    assert "Best to worst" in text and "160,000" not in text
