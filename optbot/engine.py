@@ -115,7 +115,15 @@ class Engine:
         (self.cfg.data_dir / "playbooks").mkdir(exist_ok=True)
         import json
         (self.cfg.data_dir / "playbooks" / f"{day.isoformat()}.json").write_text(json.dumps(self.playbook, indent=1, default=str))
-        self.notify.send(f"Good morning. Playbook {day:%d %b}: {self.playbook.get('summary')}")
+        note = ""
+        if type(self.data).__name__ == "AngelData":   # live session only: tests and replays stay offline
+            try:
+                from .morning import morning_note
+                note = morning_note()
+            except Exception as e:  # noqa: BLE001
+                log.info("morning note skipped: %s", e)
+        self.notify.send(f"Good morning. Playbook {day:%d %b}: {self.playbook.get('summary')}"
+                         + (f"\n{note}" if note else ""))
         held = [f"[{b.profile.name}] {p.index} {p.direction} x{p.lots}" for b in self.books for p in b.account.open]
         if held:
             self.notify.send("Still holding from yesterday: " + "; ".join(held))

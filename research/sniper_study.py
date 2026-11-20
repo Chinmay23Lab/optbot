@@ -110,6 +110,7 @@ class Trade:
     tp1: bool       # TP1 reached before the stop
     nights: int = 0
     price: float = 0.0
+    d: int = 0      # direction: +1 bought a call, -1 bought a put
 
 
 def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int = 15, tp_step: float = 2.0) -> list[Trade]:
@@ -180,7 +181,7 @@ def backtest(b15, a15, sig, sl_atr: float, mode: str, max_days: int, base: int =
         pts = d * (exit_px - entry)
         if half_pts is not None:
             pts = 0.5 * half_pts + 0.5 * pts
-        trades.append(Trade(b.ts.date(), pts, hit1, nights, entry))
+        trades.append(Trade(b.ts.date(), pts, hit1, nights, entry, d))
         reversed_here = rev
         busy_until = m - 1 if reversed_here else m
         i = m if reversed_here else m + 1
