@@ -74,7 +74,8 @@ profiles:
     target_pct_of_max_profit: null
     trail_trigger_pct: 0.30      # once up 30% on the debit, start trailing
     trail_giveback_pct: 0.35     # trailing stop gives back 35% of the peak gain
-    daily_profit_target: 1000    # no new entries after this
+    daily_profit_target: 1000
+    continue_after_target: true  # 20 Nov: keep taking good trades after the target
     daily_profit_lock_pct: 0.80  # after target, keep at least 80% of it
     daily_loss_cap: 1000
     max_losing_trades_per_day: 1

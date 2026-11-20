@@ -737,6 +737,8 @@ class Engine:
                         r = bs["risk"]
                         b.risk.state = DayState(day, float(r["peak_pnl"]), bool(r["locked"]), bool(r["stopped"]),
                                                 r.get("stop_reason", ""))
+                        if b.profile.style == "buy" and b.risk.state.stop_reason.startswith("profit lock"):
+                            b.risk.state.stopped, b.risk.state.stop_reason = False, ""   # 20 Nov rule change
                         b.traded_indices = set(bs.get("traded", []))
                     else:   # a style added since the morning: start its day now
                         self.journal.start_day(day, b.profile.name, b.account.cash, self.playbook)

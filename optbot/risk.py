@@ -45,7 +45,9 @@ class RiskManager:
             floor = self.p.daily_profit_target * self.p.daily_profit_lock_pct
             # Ratchet: the floor also rises with the peak, keeping the same share of the best level.
             floor = max(floor, s.peak_pnl * self.p.daily_profit_lock_pct)
-            if day_pnl < floor:
+            # 20 Nov (Chinmay): "don't stop it if it is finding good trades". Bought options keep trading after a
+            # dip from the day's best; only the daily loss cap and the losing-trades limit stop new entries.
+            if day_pnl < floor and self.p.style != "buy":
                 s.stopped, s.stop_reason = True, f"profit lock: day P&L fell below ₹{floor:.0f}"
                 return s.stop_reason
         return None

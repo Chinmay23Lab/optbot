@@ -75,7 +75,7 @@ def test_paper_round_trip_accounting(tmp_path):
 
 
 def test_risk_daily_cap_and_profit_lock():
-    rm = RiskManager(profile("conservative"))
+    rm = RiskManager(profile("conservative", style="spread", continue_after_target=False))
     rm.new_day(date(2026, 11, 17))
     assert rm.update_day(-1000) is not None
     rm.new_day(date(2026, 11, 17))
@@ -83,8 +83,17 @@ def test_risk_daily_cap_and_profit_lock():
     assert rm.update_day(900) is not None                     # fell below 80% of the ₹1,200 peak
 
 
+def test_profit_lock_never_stops_bought_options():
+    """20 Nov: "don't stop it if it is finding good trades". Only losses stop a buy account."""
+    rm = RiskManager(profile("option_buyer"))
+    rm.new_day(date(2026, 11, 20))
+    assert rm.update_day(6000) is None and not rm.state.stopped
+    assert rm.update_day(1000) is None and not rm.state.stopped   # gave back most of the day: keeps trading
+    assert rm.update_day(-5000) is not None                        # the loss cap still stops it
+
+
 def test_risk_target_5k_keeps_trading_after_target():
-    rm = RiskManager(profile("target_5k", max_risk_per_trade=2000, max_debit_per_lot=4000))
+    rm = RiskManager(profile("target_5k", style="spread", max_risk_per_trade=2000, max_debit_per_lot=4000))
     rm.new_day(date(2026, 11, 17))
     assert rm.update_day(5200) is None and not rm.state.stopped
     assert rm.update_day(6000) is None
@@ -498,4 +507,4 @@ def test_profit_lock_does_not_sell_bought_winners(tmp_path):
     tv.risk.state.peak_pnl = 1e9
     eng.tick()
     assert len(tv.account.open) == 1, "bought winner must keep running on its own stop"
-    assert tv.risk.state.stopped and "profit lock" in tv.risk.state.stop_reason
+    assert not tv.risk.state.stopped, "20 Nov: a dip from the day's best no longer stops new trades"
