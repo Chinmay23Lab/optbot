@@ -168,8 +168,8 @@ profiles:
     max_losing_trades_per_day: 2
     weekly_loss_cap: 5000
     account_floor: 15000
-    max_open_positions: 2
-    max_trades_per_day: 4
+    max_open_positions: 3
+    max_trades_per_day: 10  # 20 Nov: Chinmay: keep taking good trades while they work
     max_capital_in_use_pct: 0.80
     min_days_to_expiry: 2        # avoid options in their last day or two, when decay is fastest
 
@@ -205,7 +205,7 @@ profiles:
     weekly_loss_cap: 6000
     account_floor: 12000
     max_open_positions: 3
-    max_trades_per_day: 6
+    max_trades_per_day: 10  # 20 Nov: Chinmay: keep taking good trades while they work
     max_capital_in_use_pct: 0.90
     min_days_to_expiry: 2
 
