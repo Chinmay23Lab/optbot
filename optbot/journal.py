@@ -56,6 +56,12 @@ class Journal:
             (profile, start.isoformat(), end.isoformat())).fetchone()
         return float(row[0]), int(row[1]), int(row[2])
 
+    def recent_pnl(self, profile: str, n: int) -> tuple[float, int]:
+        """(net P&L, count) of the profile's last n closed trades."""
+        rows = self.db.execute("SELECT pnl FROM trades WHERE profile=? AND exit_time IS NOT NULL "
+                               "ORDER BY exit_time DESC LIMIT ?", (profile, n)).fetchall()
+        return float(sum(r[0] or 0 for r in rows)), len(rows)
+
     def trades_opened(self, profile: str, day: date) -> int:
         return int(self.db.execute("SELECT COUNT(*) FROM trades WHERE profile=? AND day=?",
                                    (profile, day.isoformat())).fetchone()[0])

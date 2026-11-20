@@ -49,6 +49,10 @@ class Profile:
     # When the daily loss cap is hit: always stop new trades. Also close the trades still open?
     # Default: yes for spreads, no for bought options (each keeps its own stop, and can't lose more than was paid).
     close_open_on_loss_cap: bool | None = None
+    # signal_source "combined": copies the trades of these styles into one account, skipping a style whose
+    # last `follow_lookback` closed trades lost money overall (it learns from each style's recent results).
+    follow: list | None = None
+    follow_lookback: int = 10
 
     def closes_open_on_loss_cap(self) -> bool:
         if self.close_open_on_loss_cap is not None:

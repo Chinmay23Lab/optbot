@@ -281,6 +281,34 @@ profiles:
     max_capital_in_use_pct: 0.75
     min_days_to_expiry: 1
 
+  combined:
+    # 20 Nov (Chinmay): "don't depend on one style, use all of them". One ₹20,000 that copies the trades of
+    # every style, with its own limits. A style whose last 10 closed trades lost money overall is skipped
+    # until it recovers, so the account leans on what is working now.
+    capital: 20000
+    style: buy
+    signal_source: combined
+    follow: [conservative, target_5k, swing, option_buyer, sniper, stocks, scalper, tradingview]
+    follow_lookback: 10
+    max_lots: 2
+    max_debit_per_lot: 12000
+    max_risk_per_trade: 4000
+    stop_pct: 0.30
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 0.30
+    trail_giveback_pct: 0.35
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.60
+    continue_after_target: true
+    daily_loss_cap: 3000
+    max_losing_trades_per_day: 3
+    weekly_loss_cap: 6000
+    account_floor: 12000
+    max_open_positions: 2
+    max_trades_per_day: 8
+    max_capital_in_use_pct: 0.95
+
   tradingview:
     # Trades ONLY the signals you send from your TradingView indicator with /tv (e.g. "/tv NIFTY up"),
     # by buying one option, so the indicator's real results can be measured separately from the bot's.

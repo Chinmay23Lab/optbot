@@ -405,6 +405,17 @@ class Engine:
                     was_carry = p.meta.get("carry")
                     was_trailing = p.trail_active
                     reason = forced
+                    if "copy_of" in p.meta:   # combined account: exits exactly when the copied trade exits
+                        src = next((q_ for bb in self.books for q_ in bb.account.open if q_.id == p.meta["copy_of"]), None)
+                        if src is None:
+                            reason = reason or f"copied trade closed ({STYLE_NAMES.get(p.meta.get('copy_from'), '')})"
+                        else:
+                            p.meta["carry"] = src.meta.get("carry", False)
+                            if reason:
+                                pass
+                            else:
+                                b.account.save()
+                                continue
                     if not reason and "u_sl" in p.meta:
                         reason = self._underlying_exit(b, p)
                     if not reason and "o_tp" in p.meta:
@@ -715,6 +726,48 @@ class Engine:
             self.journal.trade(pos)
             self.journal.decision(now, b.profile.name, sig.index, "enter", meta)
             self.notify.send(entry_message(pos, b.profile.stop_pct, worst_loss_fraction(b.profile), None, sig.reason))
+            self._copy_to_combined(b, pos, c, q, now, d, meta, sig.reason)
+
+    def _copy_to_combined(self, src: Book, pos, c, q, now: datetime, d: date, meta: dict, why: str) -> None:
+        """Combined account (Chinmay, 20 Nov): one ₹20k that takes the trades of all styles, with its own limits."""
+        for cb in self.books:
+            follow = cb.profile.follow or []
+            if cb.profile.signal_source != "combined" or src.profile.name not in follow:
+                continue
+            net, n = self.journal.recent_pnl(src.profile.name, cb.profile.follow_lookback)
+            if n >= 5 and net < 0:
+                self._note(cb.profile.name, pos.index, "skip",
+                           f"{STYLE_NAMES.get(src.profile.name, src.profile.name)} lost ₹{-net:,.0f} over its last {n} trades")
+                continue
+            if any(p.index == pos.index for p in cb.account.open):
+                continue
+            realized, _, losers = self.journal.realized(cb.profile.name, d, d)
+            ok, why_not = cb.risk.can_enter(
+                killed=cb.account.killed, paused=cb.account.paused, equity=cb.account.equity(q),
+                realized_today=realized, losers_today=losers,
+                week_realized=self.journal.week_realized(cb.profile.name, d), open_count=len(cb.account.open),
+                trades_today=self.journal.trades_opened(cb.profile.name, d), open_pnl=0.0)
+            if not ok:
+                self._note(cb.profile.name, pos.index, "blocked", why_not)
+                continue
+            if c.cost_per_lot > cb.profile.max_debit_per_lot:
+                self._note(cb.profile.name, pos.index, "skip", f"1 lot costs ₹{c.cost_per_lot:,.0f}")
+                continue
+            lots = min(pos.lots, cb.risk.size(c.cost_per_lot, c.cost_per_lot * worst_loss_fraction(cb.profile),
+                                               cb.account.cash, cb.account.capital_in_use()))
+            if lots < 1:
+                self._note(cb.profile.name, pos.index, "skip", f"not enough cash (1 lot costs ₹{c.cost_per_lot:,.0f})")
+                continue
+            m = {k: v for k, v in meta.items() if k not in ("o_tp", "o_sl", "t_exit")}
+            m.update(copy_of=pos.id, copy_from=src.profile.name)
+            cp = self.broker.open_single(cb.account, pos.index, pos.direction, c.buy, lots, q, m)
+            if cp:
+                cb.traded_indices.add(pos.index)
+                self.journal.trade(cp)
+                self.journal.decision(now, cb.profile.name, pos.index, "enter", m)
+                self.notify.send(f"[{STYLE_NAMES.get(cb.profile.name, cb.profile.name)}] copied the "
+                                 f"{STYLE_NAMES.get(src.profile.name, src.profile.name)} trade: {pos.index} "
+                                 f"{'CALL' if pos.direction == 'long' else 'PUT'} x{lots} at {cp.entry_debit:.2f}.")
 
     # ------------------------------------------------------------------ split sessions (GitHub Actions)
     def _day_state_path(self):

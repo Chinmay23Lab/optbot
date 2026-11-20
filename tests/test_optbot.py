@@ -337,7 +337,7 @@ def test_tv_command_paper_trades_your_signal(tmp_path):
     assert tv.account.open[0].legs[0].contract.right == "CE"
     eng.cmd_tv("NIFTY down")   # flip: closes the call, buys a put
     assert [p.legs[0].contract.right for p in tv.account.open] == ["PE"]
-    assert all(not b.account.open for b in eng.books if b.profile.name != "tradingview")
+    assert all(not b.account.open for b in eng.books if b.profile.name not in ("tradingview", "combined"))
 
 
 def test_sniper_live_signal_matches_backtest_rules_without_lookahead():
@@ -535,3 +535,40 @@ def test_weekly_report(tmp_path):
     assert "BANKNIFTY25NOV62400CE" in text and "₹+1,500 so far" in text
     assert "OLD" not in text
     assert "Best to worst" in text and "160,000" not in text
+
+
+def test_combined_account_copies_and_follows_exits(tmp_path):
+    """20 Nov: one ₹20k account that copies every style's trades and exits when the copied trade exits."""
+    from optbot.engine import Engine
+    from optbot.instruments import Instruments
+    from optbot.journal import Journal
+    from optbot.notify import Notifier
+    from optbot.sim import SimMarket, synthetic_rows
+    p = tmp_path / "config.yaml"
+    p.write_text(yaml.safe_dump(dict(CFG)))
+    cfg = load_config(p)
+    d = date(2026, 11, 18)
+    clock = SimClock(datetime(2026, 11, 18, 10, 30, tzinfo=IST))
+    inst = Instruments(synthetic_rows(cfg["indices"], d), cfg["indices"], cfg["vix"]["names"])
+    eng = Engine(cfg, SimMarket(clock, inst, seed=3), inst, clock, Notifier(), Journal(cfg.data_dir / "journal.sqlite"))
+    eng.start_day(d)
+    eng.cmd_tv("nifty up")
+    tv = next(b for b in eng.books if b.profile.name == "tradingview")
+    cb = next(b for b in eng.books if b.profile.name == "combined")
+    assert len(tv.account.open) == 1 and len(cb.account.open) == 1
+    src, cp = tv.account.open[0], cb.account.open[0]
+    assert cp.meta["copy_of"] == src.id and cp.legs[0].contract.token == src.legs[0].contract.token
+    eng.tick()
+    assert len(cb.account.open) == 1, "stays open while the copied trade is open"
+    eng._close(tv, src, eng._quotes_for([src]), "test exit")
+    eng.tick()
+    assert not cb.account.open, "closes when the copied trade closes"
+
+
+def test_combined_skips_a_losing_style(tmp_path):
+    from optbot.journal import Journal
+    j = Journal(tmp_path / "j.sqlite")
+    for i in range(6):
+        j.db.execute("INSERT INTO trades (id, profile, day, exit_time, pnl) VALUES (?,?,?,?,?)",
+                     (f"t{i}", "tradingview", "2026-11-17", f"2026-11-17T10:0{i}", -100))
+    assert j.recent_pnl("tradingview", 10) == (-600.0, 6)
