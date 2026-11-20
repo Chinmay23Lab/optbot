@@ -1,0 +1,45 @@
+name: weekly report
+
+# Friday after the close: each paper account's starting capital, value now, the week's winners and losers,
+# and trades still open, sent on Telegram. Reads the saved bot state only: no broker login, no orders.
+on:
+  schedule:
+    - cron: "50 10 * * 5"   # Friday 16:20 IST
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "any day of the week to report (YYYY-MM-DD); empty = this week"
+        required: false
+
+concurrency:
+  group: optbot-weekly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      OPTBOT_QUIET: "1"
+      TZ: Asia/Kolkata
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Restore bot state (read-only; not saved back)
+        uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: optbot-state-none
+          restore-keys: optbot-state-
+      - name: Send the weekly report
+        env:
+          DAY: ${{ github.event.inputs.day }}
+        run: python research/weekly_report.py --send ${DAY:+--day "$DAY"}

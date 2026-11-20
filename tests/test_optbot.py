@@ -508,3 +508,29 @@ def test_profit_lock_does_not_sell_bought_winners(tmp_path):
     eng.tick()
     assert len(tv.account.open) == 1, "bought winner must keep running on its own stop"
     assert not tv.risk.state.stopped, "20 Nov: a dip from the day's best no longer stops new trades"
+
+
+def test_weekly_report(tmp_path):
+    """20 Nov: Friday weekly summary of capital, week P&L, winners/losers and open trades."""
+    import json as _json
+    import sqlite3
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "research"))
+    from weekly_report import build
+    from optbot.journal import SCHEMA
+    db = sqlite3.connect(":memory:")
+    db.executescript(SCHEMA)
+    db.execute("INSERT INTO trades (id, profile, day, idx, direction, lots, qty, buy_symbol, entry_time, exit_time, "
+               "entry_debit, exit_value, pnl, exit_reason) VALUES ('a','sniper','2026-11-18','NIFTY','up',1,65,"
+               "'NIFTY25NOV26000CE','2026-11-18T10:00','2026-11-18T11:00',100,130,1800,'target')")
+    db.execute("INSERT INTO trades (id, profile, day, idx, direction, lots, qty, buy_symbol, entry_time, exit_time, "
+               "entry_debit, exit_value, pnl, exit_reason) VALUES ('b','sniper','2026-11-10','NIFTY','up',1,65,"
+               "'OLD','2026-11-10T10:00','2026-11-10T11:00',100,90,-800,'stop')")   # last week: left out
+    (tmp_path / "sniper.json").write_text(_json.dumps({"cash": 15000, "open": [
+        {"legs": [{"side": "BUY", "contract": {"symbol": "BANKNIFTY25NOV62400CE"}}], "qty": 30, "lots": 1,
+         "entry_debit": 200.0, "entry_time": "2026-11-20T10:00:00", "meta": {"carry_mark": 250.0}}]}))
+    text = build(db, tmp_path, [("sniper", 20000)], date(2026, 11, 16), date(2026, 11, 20))
+    assert "started with ₹20,000, now ₹22,500" in text
+    assert "₹+1,800 from 1 closed trade(s), 1 profit, 0 loss" in text
+    assert "BANKNIFTY25NOV62400CE" in text and "₹+1,500 so far" in text
+    assert "OLD" not in text
