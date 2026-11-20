@@ -5,3 +5,8 @@
 # SRF: call gave no expiry; Dec traded ~150 when the call said LTP 101, so it is the Nov contract.
 - {name: SRF, strike: 2400, right: CE, expiry_month: NOV, above: 102, sl: null, sl_close: false, targets: [], lots: 2, given: "2026-11-19 13:06"}
 - {name: BANDHANBNK, strike: 180, right: CE, expiry_month: DEC, above: 7.50, sl: 5.50, sl_close: false, targets: [9.50, 11.50], lots: 2, given: "2026-11-19 13:06"}
+# 20 Nov, forwarded 12:52 IST
+- {name: SAGILITY, strike: 45, right: CE, expiry_month: DEC, above: 2.75, sl: null, sl_close: false, targets: [4, 6], lots: 2, given: "2026-11-20 12:52"}
+- {name: COCHINSHIP, strike: 1140, right: CE, expiry_month: DEC, above: 50.50, sl: 30, sl_close: true, targets: [60, 70, 80], lots: 2, given: "2026-11-20 12:52"}
+- {name: TIINDIA, strike: 2200, right: CE, expiry_month: DEC, above: 121, sl: 60, sl_close: true, targets: [140, 160, 190], lots: 2, given: "2026-11-20 12:52"}
+- {name: PIIND, strike: 1600, right: CE, expiry_month: DEC, above: 78, sl: 60, sl_close: true, targets: [99, 120], lots: 2, given: "2026-11-20 12:52"}
