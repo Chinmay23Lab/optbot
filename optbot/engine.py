@@ -160,6 +160,11 @@ class Engine:
                                  f"last {p.meta.get('carry_mark')})")
             lines.append(f"  to date: {s['trades']} trades, net ₹{s['net_pnl']:+,.0f}, win rate {s['win_rate']}%, "
                          f"charges ₹{s['charges']:,.0f}, max drawdown ₹{s['max_drawdown']:,.0f}")
+        cap = sum(b.profile.capital for b in self.books)
+        now = sum(b.account.cash + b.account.capital_in_use() for b in self.books)
+        today = sum(self.journal.realized(b.profile.name, d, d)[0] for b in self.books)
+        lines.append(f"\nAll accounts: started with ₹{cap:,.0f}, now ₹{now:,.0f} (₹{now - cap:+,.0f}); "
+                     f"today ₹{today:+,.0f}. Paper money only.")
         why = self.why_summary(d)
         if why:
             lines.append("\nWhy it did not trade more today:")
