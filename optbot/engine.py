@@ -741,6 +741,8 @@ class Engine:
                 continue
             if any(p.index == pos.index for p in cb.account.open):
                 continue
+            if pos.index in self.stocks and not cb.profile.trade_stocks:   # 20 Nov: indices only
+                continue
             realized, _, losers = self.journal.realized(cb.profile.name, d, d)
             ok, why_not = cb.risk.can_enter(
                 killed=cb.account.killed, paused=cb.account.paused, equity=cb.account.equity(q),

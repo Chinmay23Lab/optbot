@@ -288,7 +288,9 @@ profiles:
     capital: 20000
     style: buy
     signal_source: combined
-    follow: [conservative, target_5k, swing, option_buyer, sniper, stocks, scalper, tradingview]
+    follow: [conservative, target_5k, swing, option_buyer, sniper, scalper, tradingview]
+    trade_indices: true
+    trade_stocks: false          # 20 Nov (Chinmay): stick to indices
     follow_lookback: 10
     max_lots: 2
     max_debit_per_lot: 12000
