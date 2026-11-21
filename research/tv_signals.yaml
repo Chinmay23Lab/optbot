@@ -1,0 +1,6 @@
+# Chinmay's TradingView "Sniper Short 2.0" signals, from screenshots, to score against our own rules.
+# Levels are on the index (underlying). Times IST.
+- {index: BANKNIFTY, tf: 15, side: buy, date: "2026-11-19", entry: 62378.5, sl: 61964.3, tp1: 62944, tp2: 63509.5, tp3: 64075,
+   seen: "2026-11-21 08:56", status: "TP1, TP2 and TP3 all hit by 20 Nov; close 64635.2"}
+- {index: NIFTY, tf: 15, side: buy, date: "2026-11-19", entry: 25367.7, sl: 25316, swing_sl: 25104.8, tp1: 25630.6, tp2: 25893.5, tp3: 26156.4,
+   seen: "2026-11-21 08:57", status: "TP1 hit; close 25784.75, between TP1 and TP2"}
