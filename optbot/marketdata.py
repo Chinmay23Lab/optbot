@@ -63,7 +63,7 @@ class AngelData:
         self.clock = clock
         self.quote_rl = RateLimiter(1.0)
         self.candle_rl = RateLimiter(0.4)   # Angel blocked us at 1/s once stocks were added (18 Nov)
-        self.any_rl = RateLimiter(0.9)      # one gate for every call: quote + candle bursts together still tripped the limit (19 Nov)
+        self.any_rl = RateLimiter(1.3)      # one gate for every call; 0.9 s still hit "exceeding access rate" ~100 times on 23 Nov
         self._ltp_cache: dict[tuple, tuple[float, float | None]] = {}
         self._candle_cache: dict[tuple, tuple[float, list[Candle]]] = {}
         self.record_dir = record_dir
