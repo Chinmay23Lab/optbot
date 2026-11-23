@@ -1,0 +1,28 @@
+name: day why
+
+# Prints the bot's own decisions for a day (why it did or did not trade). Reads the saved journal only; no login.
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "day (YYYY-MM-DD), default today"
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  why:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: Asia/Kolkata
+      DAY: ${{ github.event.inputs.day }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v4
+        with:
+          path: data
+          key: optbot-state-none
+          restore-keys: optbot-state-
+      - run: python research/day_why.py "${DAY:-$(date +%F)}"
