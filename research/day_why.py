@@ -22,3 +22,13 @@ for ts, prof, idx, act, det in rows:
 for k in sorted(last):
     for line in last[k][-3:]:
         print(f"  {k[0]:12s} {k[1]:10s} {line[:200]}")
+
+print("\nLOG AFTER 13:50 (no rate-limit lines)")
+from pathlib import Path
+lp = Path("data/logs/optbot.log")
+if lp.exists():
+    lines = [l for l in lp.read_text(errors="ignore").splitlines() if l.startswith(day) and l[11:16] >= "13:50"
+             and "access rate" not in l and "Too many" not in l]
+    for l in lines[:80]:
+        print("  " + l[11:260])
+    print(f"  ... {len(lines)} lines")
