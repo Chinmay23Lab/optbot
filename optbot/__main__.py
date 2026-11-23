@@ -38,6 +38,13 @@ def _setup_logging(data_dir: Path, verbose: bool) -> None:
         handlers=[_stdout_handler(),
                   logging.FileHandler(data_dir / "logs" / "optbot.log")],
     )
+    if os.environ.get("OPTBOT_QUIET"):
+        # SmartAPI's own logger (logzero) prints request headers to stdout; keep them out of public logs
+        try:
+            import logzero
+            logzero.loglevel(logging.CRITICAL)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("logzero_default").setLevel(logging.CRITICAL)
 
 
 def _load_instruments(cfg) -> Instruments:
