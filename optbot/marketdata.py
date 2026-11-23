@@ -210,16 +210,22 @@ class AngelData:
         if not hasattr(self, "_hist"):
             self._hist = {}
         key = (name, today)
-        if key not in self._hist or self._hist[key][0] < days:
+        got = self._hist.get(key)
+        # refetch when missing, too short, or an earlier fetch lost a chunk (retried every 2 minutes)
+        if got is None or got[0] < days and (got[0] >= 0 or time.time() - got[2] > 120):
             exch, tok = self.inst.spot_tokens[name]
             start = datetime.combine(today - timedelta(days=days), datetime.min.time(), tzinfo=IST).replace(hour=9, minute=15)
             end = datetime.combine(today, datetime.min.time(), tzinfo=IST).replace(hour=9, minute=14)
-            old, s = [], start
+            old, s, ok = [], start, True
             while s < end:
                 e = min(end, s + timedelta(days=60))
-                old += self._candles(exch, tok, "FIVE_MINUTE", s, e)
+                chunk = self._candles(exch, tok, "FIVE_MINUTE", s, e)
+                if not chunk and (e - s).days >= 4:
+                    ok = False   # 23 Nov: a rate-limited chunk left BANKNIFTY with 166 of 210 hourly bars all day
+                old += chunk
                 s = e
-            self._hist[key] = (days, sorted({c.ts: c for c in old if c.ts.date() < today}.values(), key=lambda c: c.ts))
+            bars = sorted({c.ts: c for c in old if c.ts.date() < today}.values(), key=lambda c: c.ts)
+            self._hist[key] = (days if ok else -1, bars, time.time())
         today_c = [c for c in self.intraday_candles(name, today) if c.ts.date() == today]
         return self._hist[key][1] + today_c
 
