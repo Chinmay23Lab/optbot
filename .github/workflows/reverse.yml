@@ -1,0 +1,46 @@
+name: stop-and-reverse study
+
+# Read-only research (26 Nov 2026): after a stop-loss, take the reverse trade?
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "years of history"
+        default: "3"
+
+concurrency:
+  group: optbot-research
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      ANGEL_CLIENT_CODE: ${{ secrets.ANGEL_CLIENT_CODE }}
+      ANGEL_PIN: ${{ secrets.ANGEL_PIN }}
+      ANGEL_API_KEY: ${{ secrets.ANGEL_API_KEY }}
+      ANGEL_TOTP_SECRET: ${{ secrets.ANGEL_TOTP_SECRET }}
+      TZ: Asia/Kolkata
+      YEARS: ${{ github.event.inputs.years }}
+    steps:
+      - name: Wait until the market session is over (never log in during it)
+        run: |
+          dow=$(date +%u)
+          if [ "$dow" -le 5 ]; then
+            now=$(date +%s); end=$(date -d "today 15:40" +%s); start=$(date -d "today 08:30" +%s)
+            if [ "$now" -ge "$start" ] && [ "$now" -lt "$end" ]; then echo "waiting $((end-now)) s"; sleep $((end-now)); fi
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Download index price history
+        run: python research/sniper_study.py fetch --out sniper_data --years "${YEARS:-3}"
+      - name: Run the study
+        run: python research/reverse_study.py --data sniper_data --report reverse_report.md && cat reverse_report.md >> "$GITHUB_STEP_SUMMARY"
