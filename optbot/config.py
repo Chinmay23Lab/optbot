@@ -46,6 +46,8 @@ class Profile:
     sniper: dict | None = None             # {rule: A-F, tf: 5/10/15/30/60, sl_atr, tp_step, exit: tp1|run}
     # entry_signal "scalper": {tf: 5|15, trigger: ema|pb, tp_pct, sl_pct, time_min, budget}; exits on the option price
     scalper: dict | None = None
+    # entry_signal "adaptive": {modes: [trend, range]} - optbot/adaptive.py day-type rules on the 15-minute chart
+    adaptive: dict | None = None
     # When the daily loss cap is hit: always stop new trades. Also close the trades still open?
     # Default: yes for spreads, no for bought options (each keeps its own stop, and can't lose more than was paid).
     close_open_on_loss_cap: bool | None = None

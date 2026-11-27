@@ -470,7 +470,9 @@ class Engine:
                 self._sniper_entries(b, now, d, scfg)
             for b in [b for b in ready if b.profile.entry_signal == "scalper"]:
                 self._scalper_entries(b, now, d, scfg)
-            ready = [b for b in ready if b.profile.entry_signal not in ("sniper", "scalper")]
+            for b in [b for b in ready if b.profile.entry_signal == "adaptive"]:
+                self._adaptive_entries(b, now, d, scfg)
+            ready = [b for b in ready if b.profile.entry_signal not in ("sniper", "scalper", "adaptive")]
             if not ready:
                 return
 
@@ -646,6 +648,54 @@ class Engine:
             self._enter_single(b, sig, now, d, scfg, {
                 "scalp": True, "tp_pct": float(sc.get("tp_pct", 0.20)), "sl_pct": float(sc.get("sl_pct", 0.10)),
                 "time_min": int(sc.get("time_min", 15)), "budget": float(sc.get("budget", 10000))})
+
+    def _adaptive_entries(self, b: Book, now: datetime, d: date, scfg: dict) -> None:
+        """Adaptive account: class the day (trend / range / jumpy) on the 15-minute chart and use the matching rule."""
+        from .adaptive import Adaptive
+        from .sniper_rules import Bar, resample
+        from .strategy import Signal
+        modes = tuple((b.profile.adaptive or {}).get("modes", ["trend"]))
+        mins = (now.hour * 60 + now.minute) - (9 * 60 + 15)
+        if mins < 15 or mins % 15 >= 5:   # only in the 5 minutes after a 15-minute bar closes
+            return
+        names = (self.indices if b.profile.trade_indices else []) + (self.stocks if b.profile.trade_stocks else [])
+        cache = self._adapt_cache = getattr(self, "_adapt_cache", {})
+        bar_end = now.replace(second=0, microsecond=0) - timedelta(minutes=mins % 15)
+        naive_now = now.replace(tzinfo=None)
+        for name in names:
+            if len(b.account.open) >= b.profile.max_open_positions:
+                return
+            if name in b.traded_indices or any(p.index == name for p in b.account.open):
+                continue
+            if not self.inst.options.get(name) or name not in self.inst.spot_tokens:
+                continue
+            slot = (name, modes, bar_end)
+            if slot not in cache:
+                try:
+                    c5 = self.data.history_candles(name, 20)
+                except Exception as e:  # noqa: BLE001
+                    log.warning("adaptive %s: %s", name, e)
+                    continue
+                bt = resample([Bar(c.ts.replace(tzinfo=None), c.open, c.high, c.low, c.close) for c in c5], 15)
+                while bt and bt[-1].ts + timedelta(minutes=15) > naive_now:   # drop the bar still forming
+                    bt.pop()
+                if len(bt) < 40 or naive_now - (bt[-1].ts + timedelta(minutes=15)) > timedelta(minutes=10):
+                    self._note(b.profile.name, name, "no-signal", "no new 15m bar yet")
+                    continue
+                cache[slot] = (Adaptive(bt, modes).signal(len(bt) - 1), bt[-1].c)
+            (direction, why, stop, tgt), close = cache[slot]
+            if not direction:
+                self._note(b.profile.name, name, "no-signal", why)
+                continue
+            spot = self.data.index_ltp(name)
+            if not spot:
+                continue
+            risk, reward = abs(close - stop), abs(tgt - close)
+            tp = round(spot + direction * reward, 2)
+            levels = {"u_entry": round(spot, 2), "u_sl": round(spot - direction * risk, 2), "u_tp1": tp,
+                      "u_tp2": tp, "u_tp3": tp, "u_exit_mode": "tp1"}
+            sig = Signal(name, "long" if direction == 1 else "short", 0.0, why, None, None)
+            self._enter_single(b, sig, now, d, scfg, levels)
 
     def _premium_exit(self, p: Position, v: float, now: datetime) -> str | None:
         """Scalper exits on the option's own price: target %, stop %, or time stop."""

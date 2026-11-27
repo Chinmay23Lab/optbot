@@ -6,7 +6,7 @@ from .models import Position
 STYLE_NAMES = {"conservative": "Safe", "target_5k": "₹5k target", "swing": "Swing (1-2 days)",
                "option_buyer": "Option buying", "tradingview": "Your TradingView indicator",
                "sniper": "Sniper-style (bot)", "combined": "Combined ₹20k (all styles)", "stocks": "Stock options",
-               "scalper": "Scalper"}
+               "scalper": "Scalper", "adaptive": "Adaptive (reads the day type)"}
 
 
 def _style(profile: str) -> str:

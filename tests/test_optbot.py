@@ -572,3 +572,23 @@ def test_combined_skips_a_losing_style(tmp_path):
         j.db.execute("INSERT INTO trades (id, profile, day, exit_time, pnl) VALUES (?,?,?,?,?)",
                      (f"t{i}", "tradingview", "2026-11-17", f"2026-11-17T10:0{i}", -100))
     assert j.recent_pnl("tradingview", 10) == (-600.0, 6)
+
+
+def test_adaptive_trend_day_signal_and_jumpy_skip():
+    from datetime import datetime, timedelta
+    from optbot.adaptive import Adaptive
+    from optbot.sniper_rules import Bar
+    bars, p = [], 100.0
+    for day in range(12):
+        t0 = datetime(2026, 11, 2 + day, 9, 15)
+        for k in range(25):
+            drift = 1.5 if (day == 11 and k >= 4) else (0.3 if k % 2 else -0.3)
+            o = p
+            p += drift
+            bars.append(Bar(t0 + timedelta(minutes=15 * k), o, max(o, p) + 0.2, min(o, p) - 0.2, p))
+    ad = Adaptive(bars, ("trend",))
+    last_day = [i for i, b in enumerate(bars) if b.ts.date() == bars[-1].ts.date()]
+    sigs = [ad.signal(i) for i in last_day]
+    hits = [s for s in sigs if s[0]]
+    assert hits and hits[0][0] == 1 and "trend day" in hits[0][1]
+    assert hits[0][2] < bars[last_day[0]].c < hits[0][3] or hits[0][3] > hits[0][2]

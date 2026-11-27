@@ -281,6 +281,38 @@ profiles:
     max_capital_in_use_pct: 0.75
     min_days_to_expiry: 1
 
+  adaptive:
+    # 27 Nov, Chinmay: "don't stick to one rule; read the day". Classes each day on the 15-minute chart after the
+    # first hour (optbot/adaptive.py): trend day (close beyond the first-hour range, EMA9/21 agree) -> ride it;
+    # back-and-forth day -> buy near the low / sell near the high on a candle; jumpy day -> stay out.
+    # 3-year test (research/adaptive-results-2026-11-27.md): trend days +₹191/trade last year (n=673) but -₹5 before
+    # (n=1319); range days lost in both periods (-₹304 / -₹281), so they are switched off. Paper test, not a proven edge.
+    capital: 20000
+    style: buy
+    entry_signal: adaptive
+    adaptive: {modes: [trend]}
+    trade_indices: true
+    trade_stocks: false
+    max_lots: 2
+    max_debit_per_lot: 12000
+    max_risk_per_trade: 5000
+    stop_pct: 0.50               # safety stop on the option price; the index stop normally exits first
+    exit_mode: trail
+    target_pct_of_max_profit: null
+    trail_trigger_pct: 5.0       # option-price trailing off: exits follow the index levels
+    trail_giveback_pct: 0.30
+    daily_profit_target: 5000
+    daily_profit_lock_pct: 0.60
+    continue_after_target: true
+    daily_loss_cap: 2500
+    max_losing_trades_per_day: 2
+    weekly_loss_cap: 5000
+    account_floor: 15000
+    max_open_positions: 2
+    max_trades_per_day: 6
+    max_capital_in_use_pct: 0.80
+    min_days_to_expiry: 2
+
   combined:
     # 20 Nov (Chinmay): "don't depend on one style, use all of them". One ₹20,000 that copies the trades of
     # every style, with its own limits. A style whose last 10 closed trades lost money overall is skipped
